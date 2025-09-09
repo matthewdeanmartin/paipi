@@ -4,11 +4,16 @@ FastAPI application for PAIPI - AI-powered PyPI search.
 
 from typing import Optional, Dict, Any
 import asyncio
+import os
+import time
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
+from starlette.middleware.cors import CORSMiddleware
+
 from .models import SearchResponse
 from .client import OpenRouterClient
 from .config import config
+from .package_cache import package_cache, CACHE_DB_PATH
 
 
 # Create FastAPI app
@@ -20,6 +25,73 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
+# --- CORS MIDDLEWARE CONFIGURATION ---
+# Define the origins that are allowed to make requests to this API.
+# In development, this is your Angular app's URL.
+origins = [
+    "http://localhost:4200",
+    "http://127.0.0.1:4200",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,  # Allows specified origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods (GET, POST, etc.)
+    allow_headers=["*"],  # Allows all headers
+)
+# --- END CORS CONFIGURATION ---
+
+
+# --- STARTUP & SHUTDOWN EVENTS ---
+@app.on_event("startup")
+async def startup_event():
+    """On startup, intelligently load and update the package cache."""
+    loop = asyncio.get_event_loop()
+
+    # This helper runs synchronous checks in a thread to not block the event loop
+    def check_cache_status():
+        if not CACHE_DB_PATH.exists():
+            return "missing"
+        if not package_cache.has_data():
+            return "empty"
+
+        # Check if cache is older than 24 hours (86400 seconds)
+        file_mod_time = os.path.getmtime(CACHE_DB_PATH)
+        if (time.time() - file_mod_time) > 86400:
+            return "outdated"
+
+        return "recent"
+
+    status = await loop.run_in_executor(None, check_cache_status)
+
+    if status == "recent":
+        print("Package cache is recent and populated. Loading into memory.")
+        await loop.run_in_executor(None, package_cache.load_into_memory)
+    elif status == "outdated":
+        print("Package cache is outdated. Loading stale data and triggering background update.")
+        # Load the old data first for immediate availability
+        await loop.run_in_executor(None, package_cache.load_into_memory)
+        # Then start the background update without awaiting it
+        loop.run_in_executor(None, package_cache.update_cache)
+    elif status in ["missing", "empty"]:
+        if status == "missing":
+            print("Package cache database not found.")
+        else:  # empty
+            print("Package cache is empty.")
+        print("Triggering background update to populate cache.")
+        # Start the background update without awaiting it
+        loop.run_in_executor(None, package_cache.update_cache)
+
+
+@app.on_event("shutdown")
+def shutdown_event():
+    """Close database connection on shutdown."""
+    package_cache.close()
+    print("Cache database connection closed.")
+
+
+# --- END STARTUP & SHUTDOWN EVENTS ---
 
 # Initialize OpenRouter client
 try:

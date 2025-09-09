@@ -7,6 +7,7 @@ from typing import List, Dict, Any, Optional
 from openai import OpenAI
 from .models import SearchResult, SearchResponse
 from .config import config
+from .package_cache import package_cache
 
 
 class OpenRouterClient:
@@ -123,6 +124,8 @@ Focus on real, popular Python packages that match the search query. Include accu
             for item in data.get("results", []):
                 try:
                     result = SearchResult(**item)
+                    # Check if the package exists in our cache
+                    result.package_exists = package_cache.package_exists(result.name)
                     results.append(result)
                 except Exception as e:
                     print(f"Error parsing result item: {e}")

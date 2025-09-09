@@ -80,6 +80,8 @@ class SearchResult(BaseModel):
     platform: Optional[str] = None
     requires_python: Optional[str] = None
     project_urls: Dict[str, str] = Field(default_factory=dict)
+    package_exists: bool = Field(False,
+                                 description="Whether the package name exists on PyPI according to the local cache.")
 
 
 class SearchResponse(BaseModel):
