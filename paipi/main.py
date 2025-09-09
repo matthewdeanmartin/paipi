@@ -31,16 +31,16 @@ except ValueError as e:
 
 
 @app.get("/")
-async def root() -> Dict[str, str]:
+async def root() -> Dict[str, Any]:
     """Root endpoint with basic information."""
     return {
         "message": "Welcome to PAIPI - AI-Powered PyPI Search",
         "description": "Search for Python packages using AI knowledge",
-        "endpoints": {
-            "search": "/search?q=<query>",
-            "docs": "/docs",
-            "health": "/health"
-        }
+        "endpoints": [
+            "GET /search?q=<query> - Search for packages",
+            "GET /docs - Interactive API documentation", 
+            "GET /health - Health check"
+        ]
     }
 
 
