@@ -37,3 +37,26 @@ interface SearchResponse {
   };
   results: SearchResult[];
 }
+
+
+/**
+ * Input metadata to draft a README.
+ */
+interface ReadmeRequest {
+  name: string;
+  summary?: string | null;
+  description?: string | null;
+  license?: string | null;
+  homepage?: string | null;
+  documentation_url?: string | null;
+  python_requires?: string | null;
+}
+
+/**
+ * Payload to generate a package.
+ */
+interface PackageGenerateRequest {
+  readme_markdown: string;
+  metadata: object;
+}
+

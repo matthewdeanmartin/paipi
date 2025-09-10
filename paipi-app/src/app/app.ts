@@ -133,9 +133,9 @@ export class App {
   async onSearch(event: Event): Promise<void> {
     event.preventDefault();
     const currentQuery = this.query().trim();
-    if (!currentQuery) {
-      return;
-    }
+    // if (!currentQuery) {
+    //   return;
+    // }
 
     // Set loading state
     this.isLoading.set(true);

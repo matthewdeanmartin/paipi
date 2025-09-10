@@ -6,8 +6,8 @@ stores them in an SQLite database, and provides a fast, in-memory check
 to verify if a package name is legitimate.
 """
 
-import sqlite3
 import re
+import sqlite3
 from pathlib import Path
 from typing import Set
 
@@ -39,7 +39,8 @@ class PackageCache:
             # check_same_thread=False is safe for this read-heavy, single-writer use case
             self._connection = sqlite3.connect(self._db_path, check_same_thread=False)
             cursor = self._connection.cursor()
-            cursor.execute("""
+            cursor.execute(
+                """
                            CREATE TABLE IF NOT EXISTS packages
                            (
                                name
@@ -47,7 +48,8 @@ class PackageCache:
                                PRIMARY
                                KEY
                            )
-                           """)
+                           """
+            )
             self._connection.commit()
             print(f"Cache database initialized at {self._db_path}")
         except sqlite3.Error as e:
@@ -64,7 +66,9 @@ class PackageCache:
                 cursor = self._connection.cursor()
                 cursor.execute("SELECT name FROM packages")
                 self._package_names = {row[0] for row in cursor.fetchall()}
-                print(f"Loaded {len(self._package_names)} package names into memory cache.")
+                print(
+                    f"Loaded {len(self._package_names)} package names into memory cache."
+                )
             except sqlite3.Error as e:
                 print(f"Database error loading names into memory: {e}")
                 self._package_names = set()
@@ -109,7 +113,10 @@ class PackageCache:
             # Use a transaction for much faster inserts
             cursor.execute("BEGIN TRANSACTION")
             cursor.execute("DELETE FROM packages")  # Clear old data
-            cursor.executemany("INSERT OR IGNORE INTO packages (name) VALUES (?)", [(name,) for name in package_names])
+            cursor.executemany(
+                "INSERT OR IGNORE INTO packages (name) VALUES (?)",
+                [(name,) for name in package_names],
+            )
             cursor.execute("COMMIT")
 
             print(f"Successfully updated cache with {len(package_names)} packages.")
