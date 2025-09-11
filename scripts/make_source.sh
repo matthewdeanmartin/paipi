@@ -1,3 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
 git2md paipi \
   --ignore __init__.py __pycache__ \
   gui.py tui.py interactive.py \

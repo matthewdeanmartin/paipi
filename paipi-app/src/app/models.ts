@@ -6,7 +6,9 @@
 interface SearchResult {
   name: string;
   version: string;
-  package_exists: boolean; // New field from the API
+  package_exists: boolean;
+  readme_cached: boolean;   // <-- ADD THIS
+  package_cached: boolean;  // <-- ADD THIS
   description?: string | null;
   summary?: string | null;
   author?: string | null;
@@ -38,6 +40,14 @@ interface SearchResponse {
   results: SearchResult[];
 }
 
+/**
+ * Represents the response from the /availability endpoint.
+ */
+interface AvailabilityResponse {
+  name: string;
+  readme_cached: boolean;
+  package_cached: boolean;
+}
 
 /**
  * Input metadata to draft a README.

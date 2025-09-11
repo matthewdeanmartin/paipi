@@ -1,59 +1,81 @@
-# PaipiApp
+# PAIPI Angular UI
 
-This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 20.2.2.
+This is the official web frontend for **PAIPI**, the AI-Powered PyPI Search engine. Built with Angular and styled with Tailwind CSS, this single-page application provides a clean and responsive interface to interact with the `paipi` backend, allowing you to search for Python packages, generate detailed README files, and download scaffolded package structures.
 
-## Development server
+## Features
 
-To start a local development server, run:
+- **AI-Powered Search**: Leverage the knowledge of a Large Language Model to find Python packages based on natural language queries.
+- **Package Validation**: Search results are color-coded to indicate whether a package name actually exists on the official PyPI repository.
+- **Detailed Package View**: Click on any search result to see a clean, detailed view with metadata, project links, and keywords.
+- **On-Demand README Generation**: With a single click, ask the AI to generate a comprehensive `README.md` file based on the package's metadata.
+- **Package Scaffolding**: Download a functional, pre-structured `.zip` file for any generated package, complete with a `pyproject.toml` and the generated README.
 
-```bash
-ng serve
-```
+## Prerequisites
 
-Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
+Before you begin, ensure you have the following installed:
 
-## Code scaffolding
+1. **Node.js**: A recent LTS version is recommended.
+2. **Angular CLI**: Install it globally if you haven't already: `npm install -g @angular/cli`.
+3. **Running PAIPI Backend**: This is a frontend application and **requires the Python backend to be running**. By default, it expects the backend to be available at `http://127.0.0.1:8080`.
 
-Angular CLI includes powerful code scaffolding tools. To generate a new component, run:
+## Getting Started
 
-```bash
-ng generate component component-name
-```
+Follow these steps to get the application running on your local machine.
 
-For a complete list of available schematics (such as `components`, `directives`, or `pipes`), run:
+1. **Clone the repository:**
 
-```bash
-ng generate --help
-```
+   ```bash
+   git clone git@github.com:matthewdeanmartin/paipi.git
+   cd paipi-app
+   ```
 
-## Building
+2. **Install dependencies:**
 
-To build the project run:
+   ```bash
+   npm install
+   ```
 
-```bash
-ng build
-```
+3. **Run the application:**
 
-This will compile your project and store the build artifacts in the `dist/` directory. By default, the production build optimizes your application for performance and speed.
+   ```bash
+   ng serve
+   ```
 
-## Running unit tests
+   Navigate to `http://localhost:4200/` in your browser. The application will automatically reload if you change any of the source files.
 
-To execute unit tests with the [Karma](https://karma-runner.github.io) test runner, use the following command:
+## How to Use the Application
 
-```bash
-ng test
-```
+1. **Search for Packages**: Use the main search bar to enter a query, like `http clients for python` or `terminal text editors`.
+2. **View Results**: The application will display a list of packages found by the AI.
+  - Package names in \<span style="color: \#60A5FA;"\>**blue**\</span\> exist on PyPI.
+  - Package names in \<span style="color: \#F87171;"\>**red**\</span\> are AI-generated suggestions that do not exist on PyPI.
+3. **See Details**: Click on any package to navigate to the detail view. Here you'll find the summary, description, author, license, and relevant links.
+4. **Generate a README**: In the detail view, click the **"Generate README.md"** button. The application will send the package metadata to the backend, which uses the AI to generate and return a complete markdown file.
+5. **Download the Package**: Once the README has been generated, a **"Download Package"** button will appear. Clicking this will generate and download a `.zip` archive containing a basic Python package structure (`pyproject.toml`, `__init__.py`, etc.) and the newly created README.
 
-## Running end-to-end tests
+## How to Contribute
 
-For end-to-end (e2e) testing, run:
+Contributions are what make the open-source community such an amazing place to learn, inspire, and create. Any contributions you make are **greatly appreciated**.
 
-```bash
-ng e2e
-```
+If you have a suggestion that would make this better, please fork the repo and create a pull request. You can also simply open an issue with the tag "enhancement".
 
-Angular CLI does not come with an end-to-end testing framework by default. You can choose one that suits your needs.
+1. **Fork the Project**
+2. **Create your Feature Branch**
+   ```bash
+   git checkout -b feature/AmazingFeature
+   ```
+3. **Commit your Changes**
+   ```bash
+   git commit -m 'Add some AmazingFeature'
+   ```
+4. **Push to the Branch**
+   ```bash
+   git push origin feature/AmazingFeature
+   ```
+5. **Open a Pull Request**
 
-## Additional Resources
+Please try to follow the existing code style and Angular best practices.
 
-For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.
+## License
+
+Distributed under the MIT License. See `LICENSE` file for more information.

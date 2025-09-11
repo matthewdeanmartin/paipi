@@ -2,6 +2,8 @@
 FastAPI application for PAIPI - AI-powered PyPI search.
 """
 
+from __future__ import annotations
+
 import asyncio
 import os
 import time
@@ -9,18 +11,32 @@ from typing import Any, Dict, Optional
 
 from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
+from pydantic import BaseModel
 from starlette.middleware.cors import CORSMiddleware
 
 from .cache_manager import cache_manager
-from .client import OpenRouterClient
+from .client_readme import OpenRouterClientReadMe
+from .client_search import OpenRouterClientSearch
 from .config import config
 from .models import (
     PackageGenerateRequest,
     ReadmeRequest,
-    ReadmeResponse,
     SearchResponse,
+    SearchResult,
 )
 from .package_cache import CACHE_DB_PATH, package_cache
+from .pypi_scraper import PypiScraper
+
+
+class AvailabilityRequest(BaseModel):
+    names: list[str]
+
+
+class AvailabilityResponseItem(BaseModel):
+    name: str
+    package_cached: bool
+    readme_cached: bool
+
 
 # Create FastAPI app
 app = FastAPI(
@@ -53,12 +69,12 @@ app.add_middleware(
 
 # --- STARTUP & SHUTDOWN EVENTS ---
 @app.on_event("startup")
-async def startup_event():
+async def startup_event() -> None:
     """On startup, intelligently load and update the package cache."""
     loop = asyncio.get_event_loop()
 
     # This helper runs synchronous checks in a thread to not block the event loop
-    def check_cache_status():
+    def check_cache_status() -> str:
         if not CACHE_DB_PATH.exists():
             return "missing"
         if not package_cache.has_data():
@@ -101,7 +117,7 @@ async def startup_event():
 
 
 @app.on_event("shutdown")
-def shutdown_event():
+def shutdown_event() -> None:
     """Close database connections on shutdown."""
     package_cache.close()
     cache_manager.close()
@@ -111,12 +127,11 @@ def shutdown_event():
 # --- END STARTUP & SHUTDOWN EVENTS ---
 
 # Initialize OpenRouter client
-try:
-    config.validate()
-    ai_client = OpenRouterClient()
-except ValueError as e:
-    print(f"Configuration error: {e}")
-    ai_client = None
+config.validate()
+ai_client = OpenRouterClientSearch()
+readme_client = OpenRouterClientReadMe()
+
+pypi_scraper = PypiScraper()
 
 
 @app.get("/")
@@ -161,18 +176,18 @@ async def search_packages(
     ),
 ) -> SearchResponse:
     """
-    Search for Python packages using AI knowledge with caching.
+    Search for Python packages using AI knowledge, augmented with live PyPI data.
 
-    This endpoint mimics the PyPI search API but uses AI to generate results
-    based on its knowledge of Python packages. Results are cached for faster
-    subsequent requests.
+    This endpoint uses AI to generate a list of relevant packages, then verifies
+    each one against the official PyPI API. Real packages are updated with live
+    metadata, while non-existent ones remain as AI suggestions. Results are cached.
 
     Args:
-        q: Search query string (empty string returns all cached results)
-        size: Maximum number of results to return (1-100)
+        q: Search query string.
+        size: Maximum number of results to return (1-100).
 
     Returns:
-        SearchResponse with AI-generated package results in PyPI format
+        SearchResponse with AI-generated and PyPI-verified package results.
     """
     if not ai_client:
         raise HTTPException(
@@ -226,22 +241,65 @@ async def search_packages(
     # Generate new results via AI
     try:
         loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            None, lambda: ai_client.search_packages(query, size)
+        # 1. Get initial results from the AI
+        ai_response = await loop.run_in_executor(
+            None, lambda: ai_client.search_packages(query, size or 20)
         )
 
-        # Cache the results
+        # Helper to augment a single result with real PyPI data
+        async def augment_result(search_result: SearchResult) -> None:
+            real_metadata = await pypi_scraper.get_project_metadata(search_result.name)
+            if real_metadata and "info" in real_metadata:
+                info = real_metadata["info"]
+                search_result.package_exists = True
+                search_result.version = info.get("version", search_result.version)
+                search_result.summary = info.get("summary", search_result.summary)
+                search_result.description = info.get("summary", search_result.summary)
+                # search_result.description = info.get(
+                #     "description", search_result.description
+                # )
+                search_result.author = info.get("author", search_result.author)
+                search_result.author_email = info.get(
+                    "author_email", search_result.author_email
+                )
+                search_result.home_page = info.get("home_page", search_result.home_page)
+                search_result.license = info.get("license", search_result.license)
+                search_result.requires_python = info.get(
+                    "requires_python", search_result.requires_python
+                )
+                search_result.package_url = info.get(
+                    "package_url", search_result.package_url
+                )
+                search_result.project_urls = info.get(
+                    "project_urls", search_result.project_urls
+                )
+                search_result.readme_cached = await loop.run_in_executor(
+                    None, lambda: cache_manager.has_readme_by_name(search_result.name)
+                )
+                search_result.package_cached = await loop.run_in_executor(
+                    None, lambda: cache_manager.has_package_by_name(search_result.name)
+                )
+            else:
+                search_result.package_exists = False
+                search_result.readme_cached = False
+                search_result.package_cached = False
+
+        # 2. Augment all results concurrently
+        if ai_response.results:
+            tasks = [augment_result(res) for res in ai_response.results]
+            await asyncio.gather(*tasks)
+
+        # 3. Cache the augmented results
         await loop.run_in_executor(
-            None, lambda: cache_manager.cache_search_results(query, result)
+            None, lambda: cache_manager.cache_search_results(query, ai_response)
         )
-
-        return result
+        return ai_response
 
     except Exception as e:
         print(f"Search error: {e}")
         raise HTTPException(
             status_code=500, detail="An error occurred while searching for packages"
-        )
+        ) from e
 
 
 # --- add endpoints in main.py ---
@@ -286,7 +344,10 @@ async def generate_readme(req: ReadmeRequest = Body(...)) -> PlainTextResponse:
     try:
         loop = asyncio.get_event_loop()
         markdown = await loop.run_in_executor(
-            None, lambda: ai_client.generate_readme(req)
+            None, lambda: readme_client.generate_readme(req)
+        )
+        markdown = await loop.run_in_executor(
+            None, lambda: readme_client.generate_readme_markdown(req)
         )
 
         # Cache the results
@@ -301,7 +362,7 @@ async def generate_readme(req: ReadmeRequest = Body(...)) -> PlainTextResponse:
         print(f"README generation error: {e}")
         raise HTTPException(
             status_code=500, detail="An error occurred while generating README"
-        )
+        ) from e
 
 
 @app.post(
@@ -338,9 +399,9 @@ async def generate_package(
         )
 
         if cached_zip:
-            from io import BytesIO
-
-            zip_io = BytesIO(cached_zip)
+            # What was intended here?
+            # from io import BytesIO
+            # _zip_io = BytesIO(cached_zip)
             return StreamingResponse(
                 iter([cached_zip]),
                 media_type="application/zip",
@@ -377,7 +438,7 @@ async def generate_package(
         print(f"Package generation error: {e}")
         raise HTTPException(
             status_code=500, detail="An error occurred while generating package"
-        )
+        ) from e
 
 
 @app.get("/cache/stats")
@@ -420,8 +481,78 @@ async def clear_cache(
         return {"status": "error", "message": str(e)}
 
 
+@app.get("/availability")
+async def availability(
+    name: str = Query(..., description="Package name")
+) -> Dict[str, Any]:
+    """Return whether README and package ZIP are already cached for a name."""
+    loop = asyncio.get_event_loop()
+    readme_cached, package_cached = await asyncio.gather(
+        loop.run_in_executor(None, lambda: cache_manager.has_readme_by_name(name)),
+        loop.run_in_executor(None, lambda: cache_manager.has_package_by_name(name)),
+    )
+    return {
+        "name": name,
+        "readme_cached": bool(readme_cached),
+        "package_cached": bool(package_cached),
+    }
+
+
+@app.post("/availability/batch")
+async def availability_batch(payload: AvailabilityRequest) -> Dict[str, Any]:
+    """Batch availability check for multiple names."""
+    loop = asyncio.get_event_loop()
+    results: list[Dict[str, Any]] = []
+    for n in payload.names:
+        readme_cached, package_cached = await asyncio.gather(
+            loop.run_in_executor(
+                None,
+                lambda n=n: cache_manager.has_readme_by_name(n),  # type: ignore[misc]
+            ),
+            loop.run_in_executor(
+                None,
+                lambda n=n: cache_manager.has_package_by_name(n),  # type: ignore[misc]
+            ),
+        )
+        results.append(
+            {
+                "name": n,
+                "readme_cached": bool(readme_cached),
+                "package_cached": bool(package_cached),
+            }
+        )
+    return {"items": results}
+
+
+@app.get(
+    "/readme/by-name/{name}",
+    response_class=PlainTextResponse,
+    responses={
+        200: {"content": {"text/markdown": {}}},
+        404: {"description": "Not found"},
+    },
+)
+async def get_readme_by_name(name: str) -> PlainTextResponse:
+    """Return the most recent cached README for a package name, if present."""
+    loop = asyncio.get_event_loop()
+    md = await loop.run_in_executor(
+        None, lambda: cache_manager.get_readme_by_name(name)
+    )
+    if not md:
+        raise HTTPException(status_code=404, detail="README not found for this package")
+    return PlainTextResponse(content=md, media_type="text/markdown")
+
+
+@app.get("/search/history")
+async def search_history() -> Dict[str, Any]:
+    """Return saved past searches with timestamps and result counts."""
+    loop = asyncio.get_event_loop()
+    hist = await loop.run_in_executor(None, cache_manager.get_search_history)
+    return {"items": hist}
+
+
 @app.exception_handler(404)
-async def not_found_handler(request, exc) -> JSONResponse:
+async def not_found_handler(_request: Any, _exc: Any) -> JSONResponse:
     """Custom 404 handler."""
     return JSONResponse(
         status_code=404,

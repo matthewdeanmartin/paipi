@@ -1,3 +1,16 @@
+## More token efficient workflow
+
+- Ask bot to respond with n relevant package names
+- Keep asking until n
+- If real, fetch from real pypi
+- If hallucinated, ask to hallucinate the metadata
+
+## More Notes
+
+- Sometimes doesn't generate enough
+- Some models the Readme.md is really lame
+- Readmes can be formulaic. Need some prompt shuffler to create some randomness.
+
 ## Notes
 
 - hallucinates packages that don't exist, but something with a similar name does (sonarque's python package)

@@ -2,6 +2,8 @@
 Pydantic models for PyPI-shaped API responses with type hints.
 """
 
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -90,6 +92,13 @@ class SearchResult(BaseModel):
     package_exists: bool = Field(
         False,
         description="Whether the package name exists on PyPI according to the local cache.",
+    )
+    readme_cached: bool = Field(
+        False,
+        description="Whether a README has been generated and cached for this package.",
+    )
+    package_cached: bool = Field(
+        False, description="Whether a generated package ZIP is cached for this package."
     )
 
 

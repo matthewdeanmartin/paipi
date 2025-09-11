@@ -2,13 +2,15 @@
 Comprehensive cache manager for search results, READMEs, and packages.
 """
 
+from __future__ import annotations
+
 import hashlib
 import json
 import sqlite3
 import zipfile
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, cast
 
 from .models import ReadmeRequest, SearchResponse
 
@@ -37,72 +39,72 @@ class CacheManager:
             # Table for search results cache
             cursor.execute(
                 """
-                           CREATE TABLE IF NOT EXISTS search_cache
-                           (
-                               query_key
-                               TEXT
-                               PRIMARY
-                               KEY,
-                               original_query
-                               TEXT
-                               NOT
-                               NULL,
-                               results_json
-                               TEXT
-                               NOT
-                               NULL,
-                               created_at
-                               TIMESTAMP
-                               DEFAULT
-                               CURRENT_TIMESTAMP
-                           )
-                           """
+                CREATE TABLE IF NOT EXISTS search_cache
+                (
+                    query_key
+                    TEXT
+                    PRIMARY
+                    KEY,
+                    original_query
+                    TEXT
+                    NOT
+                    NULL,
+                    results_json
+                    TEXT
+                    NOT
+                    NULL,
+                    created_at
+                    TIMESTAMP
+                    DEFAULT
+                    CURRENT_TIMESTAMP
+                )
+                """
             )
 
             # Table for README cache
             cursor.execute(
                 """
-                           CREATE TABLE IF NOT EXISTS readme_cache
-                           (
-                               request_hash
-                               TEXT
-                               PRIMARY
-                               KEY,
-                               package_name
-                               TEXT
-                               NOT
-                               NULL,
-                               markdown_content
-                               TEXT
-                               NOT
-                               NULL,
-                               created_at
-                               TIMESTAMP
-                               DEFAULT
-                               CURRENT_TIMESTAMP
-                           )
-                           """
+                CREATE TABLE IF NOT EXISTS readme_cache
+                (
+                    request_hash
+                    TEXT
+                    PRIMARY
+                    KEY,
+                    package_name
+                    TEXT
+                    NOT
+                    NULL,
+                    markdown_content
+                    TEXT
+                    NOT
+                    NULL,
+                    created_at
+                    TIMESTAMP
+                    DEFAULT
+                    CURRENT_TIMESTAMP
+                )
+                """
             )
 
             # Table for package cache
             cursor.execute(
                 """
-                           CREATE TABLE IF NOT EXISTS package_cache
-                           (
-                               package_name
-                               TEXT
-                               PRIMARY
-                               KEY,
-                               zip_path
-                               TEXT
-                               NOT
-                               NULL,
-                               created_at
-                               TIMESTAMP
-                               DEFAULT
-                               CURRENT_TIMESTAMP
-                           )
-                           """
+                CREATE TABLE IF NOT EXISTS package_cache
+                (
+                    package_name
+                    TEXT
+                    PRIMARY
+                    KEY,
+                    zip_path
+                    TEXT
+                    NOT
+                    NULL,
+                    created_at
+                    TIMESTAMP
+                    DEFAULT
+                    CURRENT_TIMESTAMP
+                )
+                """
             )
 
             self._connection.commit()
@@ -179,7 +181,7 @@ class CacheManager:
             self._connection.commit()
             print(f"Cached search results for query: {query}")
 
-        except (sqlite3.Error, json.JSONEncodeError) as e:
+        except (sqlite3.Error, json.JSONDecodeError) as e:
             print(f"Error caching search results: {e}")
 
     def get_all_cached_searches(self) -> List[SearchResponse]:
@@ -228,7 +230,7 @@ class CacheManager:
             result = cursor.fetchone()
 
             if result:
-                return result[0]
+                return cast(Optional[str], result[0])
 
         except sqlite3.Error as e:
             print(f"Error retrieving cached README: {e}")
@@ -269,6 +271,64 @@ class CacheManager:
         except (sqlite3.Error, OSError) as e:
             print(f"Error caching README: {e}")
 
+    # Convenience lookups by package name (no request hash required)
+    def has_readme_by_name(self, package_name: str) -> bool:
+        """Return True if we have a cached README for this package name."""
+        if not self._connection:
+            return False
+        try:
+            c = self._connection.cursor()
+            c.execute(
+                "SELECT 1 FROM readme_cache WHERE package_name = ? LIMIT 1",
+                (package_name,),
+            )
+            return c.fetchone() is not None
+        except sqlite3.Error as e:
+            print(f"Error checking README by name: {e}")
+            return False
+
+    def get_readme_by_name(self, package_name: str) -> Optional[str]:
+        """Return the most recent README markdown by package name, if present."""
+        if not self._connection:
+            return None
+        try:
+            c = self._connection.cursor()
+            # newest by created_at in case multiple entries exist
+            c.execute(
+                """
+                SELECT markdown_content
+                FROM readme_cache
+                WHERE package_name = ?
+                ORDER BY datetime(created_at) DESC LIMIT 1
+                """,
+                (package_name,),
+            )
+            row = c.fetchone()
+            return row[0] if row else None
+        except sqlite3.Error as e:
+            print(f"Error fetching README by name: {e}")
+            return None
+
+    def list_readme_packages(self) -> List[Dict[str, Any]]:
+        """Return list of packages for which we have cached READMEs."""
+        if not self._connection:
+            return []
+        try:
+            c = self._connection.cursor()
+            c.execute(
+                """
+                SELECT package_name, MAX(datetime(created_at)) as latest
+                FROM readme_cache
+                GROUP BY package_name
+                ORDER BY latest DESC
+                """
+            )
+            rows = c.fetchall()
+            return [{"package_name": r[0], "latest": r[1]} for r in rows]
+        except sqlite3.Error as e:
+            print(f"Error listing README packages: {e}")
+            return []
+
     # Package caching
 
     def get_cached_package(self, package_name: str) -> Optional[bytes]:
@@ -288,18 +348,64 @@ class CacheManager:
                 zip_path = Path(result[0])
                 if zip_path.exists():
                     return zip_path.read_bytes()
-                else:
-                    # Clean up stale database entry
-                    cursor.execute(
-                        "DELETE FROM package_cache WHERE package_name = ?",
-                        (package_name,),
-                    )
-                    self._connection.commit()
+                # Clean up stale database entry
+                cursor.execute(
+                    "DELETE FROM package_cache WHERE package_name = ?",
+                    (package_name,),
+                )
+                self._connection.commit()
 
         except sqlite3.Error as e:
             print(f"Error retrieving cached package: {e}")
 
         return None
+
+    def has_package_by_name(self, package_name: str) -> bool:
+        """True if a package ZIP is cached (and file exists)."""
+        if not self._connection:
+            return False
+        try:
+            c = self._connection.cursor()
+            c.execute(
+                "SELECT zip_path FROM package_cache WHERE package_name = ?",
+                (package_name,),
+            )
+            row = c.fetchone()
+            if not row:
+                return False
+            return Path(row[0]).exists()
+        except sqlite3.Error as e:
+            print(f"Error checking package by name: {e}")
+            return False
+
+    # --- Search history ---
+    def get_search_history(self) -> List[Dict[str, Any]]:
+        """Return list of prior searches with created_at and lightweight counts."""
+        if not self._connection:
+            return []
+        try:
+            c = self._connection.cursor()
+            c.execute(
+                """
+                SELECT original_query, results_json, created_at
+                FROM search_cache
+                ORDER BY datetime(created_at) DESC
+                """
+            )
+            rows = c.fetchall()
+            out: List[Dict[str, Any]] = []
+            for q, res_json, ts in rows:
+                count = 0
+                try:
+                    data = json.loads(res_json)
+                    count = len(data.get("results", []))
+                except json.JSONDecodeError:
+                    pass
+                out.append({"query": q, "count": count, "created_at": ts})
+            return out
+        except sqlite3.Error as e:
+            print(f"Error retrieving search history: {e}")
+            return []
 
     def cache_package(self, package_name: str, zip_bytes: bytes) -> None:
         """Cache package ZIP bytes to file and database."""

@@ -6,23 +6,23 @@ A self-contained module for running Open Interpreter in a Docker container
 to generate Python libraries based on PyPI descriptions and README specifications.
 """
 
-import os
-import sys
+from __future__ import annotations
+
 import json
-import time
-import shutil
 import logging
-import tempfile
+import os
+import shutil
 import subprocess
+import sys
+import tempfile
+import time
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Optional, Dict, Any, List
-from dataclasses import dataclass, asdict
-from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class GenerationConfig:
     """Configuration for library generation"""
+
     python_version: str = "3.11"
     cache_folder: str = "./cache"
     container_name: Optional[str] = None
@@ -42,12 +43,14 @@ class GenerationConfig:
 @dataclass
 class LibrarySpec:
     """Specification for the library to generate"""
+
     name: str
+    python_version: str
     pypi_description: str
     readme_content: str
-    additional_requirements: List[str] = None
+    additional_requirements: List[str] | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.additional_requirements is None:
             self.additional_requirements = []
 
@@ -60,7 +63,9 @@ class DockerOpenInterpreter:
     def __init__(self, config: GenerationConfig):
         self.config = config
         self.cache_path = Path(config.cache_folder).resolve()
-        self.container_name = config.container_name or f"oi-generator-{int(time.time())}"
+        self.container_name = (
+            config.container_name or f"oi-generator-{int(time.time())}"
+        )
 
         # Ensure cache directory exists
         self.cache_path.mkdir(parents=True, exist_ok=True)
@@ -75,14 +80,11 @@ class DockerOpenInterpreter:
         """Validate that Docker is installed and running"""
         try:
             result = subprocess.run(
-                ["docker", "--version"],
-                capture_output=True,
-                text=True,
-                check=True
+                ["docker", "--version"], capture_output=True, text=True, check=True
             )
             self.logger.info(f"Docker found: {result.stdout.strip()}")
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            raise RuntimeError("Docker is not installed or not running")
+        except (subprocess.CalledProcessError, FileNotFoundError) as some_error:
+            raise RuntimeError("Docker is not installed or not running") from some_error
 
     def _create_dockerfile(self, work_dir: Path, python_version: str) -> None:
         """Create a Dockerfile for the Open Interpreter container"""
@@ -119,6 +121,7 @@ CMD ["python", "-c", "import interpreter; print('Open Interpreter ready')"]
 
     def _create_generation_script(self, work_dir: Path, spec: LibrarySpec) -> None:
         """Create the Python script that will run inside the container"""
+        python_version = spec.python_version
         script_content = f'''
 import os
 import sys
@@ -247,26 +250,18 @@ if __name__ == "__main__":
         """Build the Docker container"""
         self.logger.info(f"Building Docker container: {self.container_name}")
 
-        build_cmd = [
-            "docker", "build",
-            "-t", self.container_name,
-            str(work_dir)
-        ]
+        build_cmd = ["docker", "build", "-t", self.container_name, str(work_dir)]
 
         try:
             result = subprocess.run(
-                build_cmd,
-                cwd=work_dir,
-                capture_output=True,
-                text=True,
-                check=True
+                build_cmd, cwd=work_dir, capture_output=True, text=True, check=True
             )
             self.logger.info("Container built successfully")
             if result.stdout:
                 self.logger.debug(f"Build output: {result.stdout}")
         except subprocess.CalledProcessError as e:
             self.logger.error(f"Failed to build container: {e.stderr}")
-            raise RuntimeError(f"Docker build failed: {e.stderr}")
+            raise RuntimeError(f"Docker build failed: {e.stderr}") from e
 
     def _run_container(self, work_dir: Path) -> Dict[str, Any]:
         """Run the container and capture output"""
@@ -283,70 +278,81 @@ if __name__ == "__main__":
             env_vars.extend(["-e", f"OPENAI_API_KEY={self.config.openai_api_key}"])
         env_vars.extend(["-e", f"MODEL={self.config.model}"])
 
-        run_cmd = [
-                      "docker", "run",
-                      "--rm",
-                      "--name", f"{self.container_name}_run",
-                      "-v", f"{output_dir}:/output",
-                      "-v", f"{work_dir / 'generate_library.py'}:/workspace/generate_library.py",
-                  ] + env_vars + [
-                      self.container_name,
-                      "python", "/workspace/generate_library.py"
-                  ]
+        run_cmd = (
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--name",
+                f"{self.container_name}_run",
+                "-v",
+                f"{output_dir}:/output",
+                "-v",
+                f"{work_dir / 'generate_library.py'}:/workspace/generate_library.py",
+            ]
+            + env_vars
+            + [self.container_name, "python", "/workspace/generate_library.py"]
+        )
 
         try:
             self.logger.info("Starting container execution...")
 
-            with open(log_file, 'w') as log_f:
-                process = subprocess.Popen(
+            with open(log_file, "w", encoding="utf-8") as log_f:
+                with subprocess.Popen(
                     run_cmd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
                     bufsize=1,
-                    universal_newlines=True
-                )
+                    universal_newlines=True,
+                ) as process:
 
-                # Stream output in real-time
-                for line in process.stdout:
-                    print(f"[CONTAINER] {line.rstrip()}")
-                    log_f.write(line)
-                    log_f.flush()
+                    # Stream output in real-time
+                    if process.stdout:
+                        for line in process.stdout:
+                            print(f"[CONTAINER] {line.rstrip()}")
+                            log_f.write(line)
+                            log_f.flush()
 
-                process.wait(timeout=self.config.timeout_seconds)
+                    process.wait(timeout=self.config.timeout_seconds)
 
-                if process.returncode != 0:
-                    raise subprocess.CalledProcessError(process.returncode, run_cmd)
+                    if process.returncode != 0:
+                        raise subprocess.CalledProcessError(process.returncode, run_cmd)
 
             self.logger.info("Container execution completed successfully")
 
             return {
                 "status": "success",
                 "output_directory": str(output_dir),
-                "log_file": str(log_file)
+                "log_file": str(log_file),
             }
 
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as te:
             self.logger.error("Container execution timed out")
-            try:
-                subprocess.run(["docker", "kill", f"{self.container_name}_run"],
-                               capture_output=True)
-            except:
-                pass
-            raise RuntimeError(f"Container execution timed out after {self.config.timeout_seconds} seconds")
+
+            subprocess.run(
+                ["docker", "kill", f"{self.container_name}_run"],
+                capture_output=True,
+                check=True,
+            )
+            raise RuntimeError(
+                f"Container execution timed out after {self.config.timeout_seconds} seconds"
+            ) from te
 
         except subprocess.CalledProcessError as e:
-            self.logger.error(f"Container execution failed with exit code {e.returncode}")
-            error_info = {"error": "Container execution failed", "exit_code": e.returncode}
+            self.logger.error(
+                f"Container execution failed with exit code {e.returncode}"
+            )
+            error_info = {
+                "error": "Container execution failed",
+                "exit_code": e.returncode,
+            }
 
             # Try to read error logs
             if log_file.exists():
-                try:
-                    error_info["logs"] = log_file.read_text()
-                except:
-                    pass
+                error_info["logs"] = log_file.read_text()
 
-            raise RuntimeError(f"Container execution failed: {error_info}")
+            raise RuntimeError(f"Container execution failed: {error_info}") from e
 
     def generate_library(self, spec: LibrarySpec) -> Dict[str, Any]:
         """
@@ -378,14 +384,11 @@ if __name__ == "__main__":
                 result = self._run_container(work_dir)
 
                 # Cleanup container image
-                try:
-                    subprocess.run(
-                        ["docker", "rmi", self.container_name],
-                        capture_output=True,
-                        check=False
-                    )
-                except:
-                    pass
+                subprocess.run(
+                    ["docker", "rmi", self.container_name],
+                    capture_output=True,
+                    check=False,
+                )
 
                 self.logger.info("Library generation completed successfully")
                 return result
@@ -394,14 +397,11 @@ if __name__ == "__main__":
                 self.logger.error(f"Library generation failed: {e}")
 
                 # Cleanup on failure
-                try:
-                    subprocess.run(
-                        ["docker", "rmi", self.container_name],
-                        capture_output=True,
-                        check=False
-                    )
-                except:
-                    pass
+                subprocess.run(
+                    ["docker", "rmi", self.container_name],
+                    capture_output=True,
+                    check=False,
+                )
 
                 raise
 
@@ -413,15 +413,13 @@ if __name__ == "__main__":
             if output_dir.is_dir():
                 summary_file = output_dir / "generation_summary.json"
                 if summary_file.exists():
-                    try:
-                        with open(summary_file, 'r') as f:
-                            summary = json.load(f)
-                            summary['output_path'] = str(output_dir)
-                            libraries.append(summary)
-                    except:
-                        pass
 
-        return sorted(libraries, key=lambda x: x.get('generation_timestamp', ''))
+                    with open(summary_file, encoding="utf-8") as f:
+                        summary = json.load(f)
+                        summary["output_path"] = str(output_dir)
+                        libraries.append(summary)
+
+        return sorted(libraries, key=lambda x: x.get("generation_timestamp", ""))
 
     def cleanup_cache(self, older_than_days: int = 7) -> int:
         """Remove old generated libraries from cache"""
@@ -430,32 +428,36 @@ if __name__ == "__main__":
 
         for output_dir in self.cache_path.glob("output_*"):
             if output_dir.is_dir():
-                try:
-                    # Extract timestamp from directory name
-                    timestamp = int(output_dir.name.split('_')[1])
-                    if timestamp < cutoff_time:
-                        shutil.rmtree(output_dir)
-                        removed_count += 1
-                        self.logger.info(f"Removed old cache directory: {output_dir}")
-                except (ValueError, IndexError):
-                    # Skip directories that don't match the expected naming pattern
-                    pass
+                # Extract timestamp from directory name
+                timestamp = int(output_dir.name.split("_")[1])
+                if timestamp < cutoff_time:
+                    shutil.rmtree(output_dir)
+                    removed_count += 1
+                    self.logger.info(f"Removed old cache directory: {output_dir}")
 
         return removed_count
 
 
-def main():
+def main() -> None:
     """Example usage of the DockerOpenInterpreter"""
     import argparse
 
-    parser = argparse.ArgumentParser(description="Generate Python libraries using Open Interpreter in Docker")
+    parser = argparse.ArgumentParser(
+        description="Generate Python libraries using Open Interpreter in Docker"
+    )
     parser.add_argument("--name", required=True, help="Library name")
     parser.add_argument("--description", required=True, help="PyPI description")
-    parser.add_argument("--readme", required=True, help="Path to README file or inline content")
-    parser.add_argument("--python-version", default="3.11", help="Python version (default: 3.11)")
+    parser.add_argument(
+        "--readme", required=True, help="Path to README file or inline content"
+    )
+    parser.add_argument(
+        "--python-version", default="3.11", help="Python version (default: 3.11)"
+    )
     parser.add_argument("--cache-folder", default="./cache", help="Cache folder path")
     parser.add_argument("--openai-api-key", help="OpenAI API key")
-    parser.add_argument("--model", default="gpt-4", help="Model to use (default: gpt-4)")
+    parser.add_argument(
+        "--model", default="gpt-4", help="Model to use (default: gpt-4)"
+    )
     parser.add_argument("--timeout", type=int, default=3600, help="Timeout in seconds")
     parser.add_argument("--list", action="store_true", help="List generated libraries")
     parser.add_argument("--cleanup", type=int, help="Remove cache older than N days")
@@ -467,7 +469,7 @@ def main():
         cache_folder=args.cache_folder,
         timeout_seconds=args.timeout,
         openai_api_key=args.openai_api_key or os.environ.get("OPENAI_API_KEY"),
-        model=args.model
+        model=args.model,
     )
 
     interpreter = DockerOpenInterpreter(config)
@@ -491,18 +493,20 @@ def main():
     # Read README content
     readme_content = args.readme
     if Path(args.readme).exists():
-        readme_content = Path(args.readme).read_text()
+        readme_content = Path(args.readme).read_text(encoding="utf-8")
 
+    python_version = args.python_version
     # Create library specification
     spec = LibrarySpec(
         name=args.name,
         pypi_description=args.description,
-        readme_content=readme_content
+        readme_content=readme_content,
+        python_version=python_version,
     )
 
     try:
         result = interpreter.generate_library(spec)
-        print(f"✅ Library generated successfully!")
+        print("✅ Library generated successfully!")
         print(f"📁 Output directory: {result['output_directory']}")
         print(f"📋 Log file: {result['log_file']}")
     except Exception as e:

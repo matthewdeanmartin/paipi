@@ -6,6 +6,8 @@ stores them in an SQLite database, and provides a fast, in-memory check
 to verify if a package name is legitimate.
 """
 
+from __future__ import annotations
+
 import re
 import sqlite3
 from pathlib import Path
@@ -26,7 +28,7 @@ class PackageCache:
     _connection: sqlite3.Connection | None = None
     _package_names: Set[str] | None = None
 
-    def __new__(cls, db_path: Path = CACHE_DB_PATH):
+    def __new__(cls, db_path: Path = CACHE_DB_PATH) -> PackageCache:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._db_path = db_path
@@ -56,7 +58,7 @@ class PackageCache:
             print(f"Database error during initialization: {e}")
             self._connection = None
 
-    def load_into_memory(self):
+    def load_into_memory(self) -> None:
         """Load all package names from DB into a set for fast lookups."""
         if self._package_names is not None:
             return  # Already loaded
@@ -142,7 +144,7 @@ class PackageCache:
 
         return normalized_name in self._package_names if self._package_names else False
 
-    def close(self):
+    def close(self) -> None:
         """Closes the database connection."""
         if self._connection:
             self._connection.close()

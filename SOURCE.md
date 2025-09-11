@@ -1,11 +1,16 @@
 ## Tree for paipi
 ```
 ├── cache_manager.py
-├── client.py
+├── client_base.py
+├── client_readme.py
+├── client_search.py
 ├── config.py
+├── generate_package.py
+├── logger.py
 ├── main.py
 ├── models.py
-└── package_cache.py
+├── package_cache.py
+└── pypi_scraper.py
 ```
 
 ## File: cache_manager.py
@@ -14,13 +19,15 @@
 Comprehensive cache manager for search results, READMEs, and packages.
 """
 
+from __future__ import annotations
+
 import hashlib
 import json
 import sqlite3
 import zipfile
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, cast
 
 from .models import ReadmeRequest, SearchResponse
 
@@ -49,72 +56,72 @@ class CacheManager:
             # Table for search results cache
             cursor.execute(
                 """
-                           CREATE TABLE IF NOT EXISTS search_cache
-                           (
-                               query_key
-                               TEXT
-                               PRIMARY
-                               KEY,
-                               original_query
-                               TEXT
-                               NOT
-                               NULL,
-                               results_json
-                               TEXT
-                               NOT
-                               NULL,
-                               created_at
-                               TIMESTAMP
-                               DEFAULT
-                               CURRENT_TIMESTAMP
-                           )
-                           """
+                CREATE TABLE IF NOT EXISTS search_cache
+                (
+                    query_key
+                    TEXT
+                    PRIMARY
+                    KEY,
+                    original_query
+                    TEXT
+                    NOT
+                    NULL,
+                    results_json
+                    TEXT
+                    NOT
+                    NULL,
+                    created_at
+                    TIMESTAMP
+                    DEFAULT
+                    CURRENT_TIMESTAMP
+                )
+                """
             )
 
             # Table for README cache
             cursor.execute(
                 """
-                           CREATE TABLE IF NOT EXISTS readme_cache
-                           (
-                               request_hash
-                               TEXT
-                               PRIMARY
-                               KEY,
-                               package_name
-                               TEXT
-                               NOT
-                               NULL,
-                               markdown_content
-                               TEXT
-                               NOT
-                               NULL,
-                               created_at
-                               TIMESTAMP
-                               DEFAULT
-                               CURRENT_TIMESTAMP
-                           )
-                           """
+                CREATE TABLE IF NOT EXISTS readme_cache
+                (
+                    request_hash
+                    TEXT
+                    PRIMARY
+                    KEY,
+                    package_name
+                    TEXT
+                    NOT
+                    NULL,
+                    markdown_content
+                    TEXT
+                    NOT
+                    NULL,
+                    created_at
+                    TIMESTAMP
+                    DEFAULT
+                    CURRENT_TIMESTAMP
+                )
+                """
             )
 
             # Table for package cache
             cursor.execute(
                 """
-                           CREATE TABLE IF NOT EXISTS package_cache
-                           (
-                               package_name
-                               TEXT
-                               PRIMARY
-                               KEY,
-                               zip_path
-                               TEXT
-                               NOT
-                               NULL,
-                               created_at
-                               TIMESTAMP
-                               DEFAULT
-                               CURRENT_TIMESTAMP
-                           )
-                           """
+                CREATE TABLE IF NOT EXISTS package_cache
+                (
+                    package_name
+                    TEXT
+                    PRIMARY
+                    KEY,
+                    zip_path
+                    TEXT
+                    NOT
+                    NULL,
+                    created_at
+                    TIMESTAMP
+                    DEFAULT
+                    CURRENT_TIMESTAMP
+                )
+                """
             )
 
             self._connection.commit()
@@ -191,7 +198,7 @@ class CacheManager:
             self._connection.commit()
             print(f"Cached search results for query: {query}")
 
-        except (sqlite3.Error, json.JSONEncodeError) as e:
+        except (sqlite3.Error, json.JSONDecodeError) as e:
             print(f"Error caching search results: {e}")
 
     def get_all_cached_searches(self) -> List[SearchResponse]:
@@ -240,7 +247,7 @@ class CacheManager:
             result = cursor.fetchone()
 
             if result:
-                return result[0]
+                return cast(Optional[str], result[0])
 
         except sqlite3.Error as e:
             print(f"Error retrieving cached README: {e}")
@@ -281,6 +288,64 @@ class CacheManager:
         except (sqlite3.Error, OSError) as e:
             print(f"Error caching README: {e}")
 
+    # Convenience lookups by package name (no request hash required)
+    def has_readme_by_name(self, package_name: str) -> bool:
+        """Return True if we have a cached README for this package name."""
+        if not self._connection:
+            return False
+        try:
+            c = self._connection.cursor()
+            c.execute(
+                "SELECT 1 FROM readme_cache WHERE package_name = ? LIMIT 1",
+                (package_name,),
+            )
+            return c.fetchone() is not None
+        except sqlite3.Error as e:
+            print(f"Error checking README by name: {e}")
+            return False
+
+    def get_readme_by_name(self, package_name: str) -> Optional[str]:
+        """Return the most recent README markdown by package name, if present."""
+        if not self._connection:
+            return None
+        try:
+            c = self._connection.cursor()
+            # newest by created_at in case multiple entries exist
+            c.execute(
+                """
+                SELECT markdown_content
+                FROM readme_cache
+                WHERE package_name = ?
+                ORDER BY datetime(created_at) DESC LIMIT 1
+                """,
+                (package_name,),
+            )
+            row = c.fetchone()
+            return row[0] if row else None
+        except sqlite3.Error as e:
+            print(f"Error fetching README by name: {e}")
+            return None
+
+    def list_readme_packages(self) -> List[Dict[str, Any]]:
+        """Return list of packages for which we have cached READMEs."""
+        if not self._connection:
+            return []
+        try:
+            c = self._connection.cursor()
+            c.execute(
+                """
+                SELECT package_name, MAX(datetime(created_at)) as latest
+                FROM readme_cache
+                GROUP BY package_name
+                ORDER BY latest DESC
+                """
+            )
+            rows = c.fetchall()
+            return [{"package_name": r[0], "latest": r[1]} for r in rows]
+        except sqlite3.Error as e:
+            print(f"Error listing README packages: {e}")
+            return []
+
     # Package caching
 
     def get_cached_package(self, package_name: str) -> Optional[bytes]:
@@ -300,18 +365,64 @@ class CacheManager:
                 zip_path = Path(result[0])
                 if zip_path.exists():
                     return zip_path.read_bytes()
-                else:
-                    # Clean up stale database entry
-                    cursor.execute(
-                        "DELETE FROM package_cache WHERE package_name = ?",
-                        (package_name,),
-                    )
-                    self._connection.commit()
+                # Clean up stale database entry
+                cursor.execute(
+                    "DELETE FROM package_cache WHERE package_name = ?",
+                    (package_name,),
+                )
+                self._connection.commit()
 
         except sqlite3.Error as e:
             print(f"Error retrieving cached package: {e}")
 
         return None
+
+    def has_package_by_name(self, package_name: str) -> bool:
+        """True if a package ZIP is cached (and file exists)."""
+        if not self._connection:
+            return False
+        try:
+            c = self._connection.cursor()
+            c.execute(
+                "SELECT zip_path FROM package_cache WHERE package_name = ?",
+                (package_name,),
+            )
+            row = c.fetchone()
+            if not row:
+                return False
+            return Path(row[0]).exists()
+        except sqlite3.Error as e:
+            print(f"Error checking package by name: {e}")
+            return False
+
+    # --- Search history ---
+    def get_search_history(self) -> List[Dict[str, Any]]:
+        """Return list of prior searches with created_at and lightweight counts."""
+        if not self._connection:
+            return []
+        try:
+            c = self._connection.cursor()
+            c.execute(
+                """
+                SELECT original_query, results_json, created_at
+                FROM search_cache
+                ORDER BY datetime(created_at) DESC
+                """
+            )
+            rows = c.fetchall()
+            out: List[Dict[str, Any]] = []
+            for q, res_json, ts in rows:
+                count = 0
+                try:
+                    data = json.loads(res_json)
+                    count = len(data.get("results", []))
+                except json.JSONDecodeError:
+                    pass
+                out.append({"query": q, "count": count, "created_at": ts})
+            return out
+        except sqlite3.Error as e:
+            print(f"Error retrieving search history: {e}")
+            return []
 
     def cache_package(self, package_name: str, zip_bytes: bytes) -> None:
         """Cache package ZIP bytes to file and database."""
@@ -530,23 +641,27 @@ SOFTWARE.
 # Global cache manager instance
 cache_manager = CacheManager()
 ```
-## File: client.py
+## File: client_base.py
 ```python
 """
-OpenRouter AI client for generating PyPI-style search results.
+Base OpenRouter AI client.
+
+Handles structured formats and simple retry workflows.
 """
 
-import json
-from typing import Any, Dict, List, Optional
+from __future__ import annotations
 
+import json
+from typing import Any, Dict, Optional, cast
+
+import untruncate_json
 from openai import OpenAI
 
 from .config import config
-from .models import ReadmeRequest, SearchResponse, SearchResult
-from .package_cache import package_cache
+from .logger import llm_logger  # <--- IMPORT THE NEW LOGGER
 
 
-class OpenRouterClient:
+class OpenRouterClientBase:
     """Client for interacting with OpenRouter AI service via OpenAI interface."""
 
     def __init__(
@@ -564,128 +679,162 @@ class OpenRouterClient:
             base_url=self.base_url,
         )
 
-    def search_packages(self, query: str, limit: int = 20) -> SearchResponse:
-        """
-        Search for Python packages using AI knowledge.
-
-        Args:
-            query: Search query for Python packages
-            limit: Maximum number of results to return
-
-        Returns:
-            SearchResponse containing AI-generated package results
-        """
-        prompt = self._build_search_prompt(query, limit)
-
+    # -----------------
+    # Robust JSON repair helpers (used by search + legacy README path)
+    # -----------------
+    def ask_llm_to_fix_json(self, broken_json: str) -> Optional[str]:
+        """Makes a one-shot request to the LLM to fix a broken JSON string."""
+        print("--- Attempting one-shot LLM call to fix JSON ---")
         try:
             response = self.client.chat.completions.create(
                 model=config.default_model,
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a helpful assistant that knows about Python packages on PyPI. "
-                        "You should return realistic package information in the exact JSON format requested.",
+                        "content": "You are a JSON repair utility. The user will provide a malformed JSON string. "
+                        "Your sole task is to correct any syntax errors (e.g., trailing commas, "
+                        "missing brackets, incorrect quoting) and return only the valid, minified JSON object. "
+                        "Do not add any commentary, explanations, or markdown fences.",
                     },
-                    {"role": "user", "content": prompt},
+                    {"role": "user", "content": broken_json},
                 ],
-                temperature=0.7,
+                temperature=0.0,  # Be deterministic
                 max_tokens=4000,
             )
-
-            content = response.choices[0].message.content
-            if not content:
-                return SearchResponse()
-
-            # Parse the AI response and convert to our model
-            return self._parse_ai_response(content, query)
-
+            fixed_content = response.choices[0].message.content
+            llm_logger.debug(
+                f"LLM attempt to fix JSON resulted in:\n---\n{fixed_content}\n---"
+            )
+            return fixed_content
         except Exception as e:
-            # Return empty response on error but log it
-            print(f"Error querying OpenRouter: {e}")
-            return SearchResponse()
+            print(f"Error during LLM JSON fix attempt: {e}")
+            llm_logger.error(f"Error during LLM JSON fix attempt: {e}")
+            return None
 
-    def _build_search_prompt(self, query: str, limit: int) -> str:
-        """Build the prompt for the AI to generate PyPI search results."""
-        return f"""
-Please search for Python packages related to: "{query}"
+    def parse_and_repair_json(self, content: str) -> Dict[str, Any]:
+        """
+        A robust method to parse JSON, with multiple repair strategies.
 
-Return up to {limit} relevant Python packages in this exact JSON format:
-{{
-    "results": [
-        {{
-            "name": "package-name",
-            "version": "1.0.0",
-            "description": "Brief description of the package",
-            "summary": "One-line summary",
-            "author": "Author Name",
-            "author_email": "author@example.com",
-            "home_page": "https://github.com/author/package",
-            "package_url": "https://pypi.org/project/package-name/",
-            "keywords": "keyword1, keyword2",
-            "license": "MIT",
-            "classifiers": [
-                "Development Status :: 4 - Beta",
-                "Intended Audience :: Developers",
-                "License :: OSI Approved :: MIT License",
-                "Programming Language :: Python :: 3"
-            ],
-            "requires_python": ">=3.7",
-            "project_urls": {{
-                "Homepage": "https://github.com/author/package",
-                "Repository": "https://github.com/author/package",
-                "Documentation": "https://package.readthedocs.io/"
-            }}
-        }}
-    ]
-}}
+        Raises:
+            ValueError: If all parsing and repair attempts fail.
+        """
+        # 1. Clean up common markdown fences
+        s = content.strip()
+        if s.startswith("```json"):
+            s = s.split("```json", 1)[1]
+            if "```" in s:
+                s = s.rsplit("```", 1)[0]
+        elif s.startswith("```"):
+            s = s.split("```", 1)[1]
+            if "```" in s:
+                s = s.rsplit("```", 1)[0]
 
-Focus on real, popular Python packages that match the search query. Include accurate information about versions, authors, and descriptions. If you're not certain about specific details, provide reasonable defaults that match typical PyPI package patterns.
+        s = s.strip()
+
+        # 2. First attempt: Standard JSON load
+        try:
+            return cast(dict[str, Any], json.loads(s))
+        except json.JSONDecodeError as e:
+            print(f"Initial JSON decode failed: {e}. Attempting repairs...")
+            llm_logger.warning(f"Initial JSON decode failed: {e}. Raw content:\n{s}")
+
+        # 3. Second attempt: Use untruncate_json for common truncation issues
+        try:
+            repaired_s = untruncate_json.complete(s)
+            data = json.loads(repaired_s)
+            print("Successfully repaired JSON with `untruncate_json`.")
+            llm_logger.info("Successfully repaired JSON with `untruncate_json`.")
+            return cast(dict[str, Any], data)
+        except (json.JSONDecodeError, Exception) as e:
+            print(f"`untruncate_json` failed: {e}. Attempting LLM-based fix.")
+            llm_logger.warning(f"`untruncate_json` failed: {e}.")
+
+        # 4. Third attempt: One-shot call to the LLM to fix the JSON
+        fixed_json_str = self.ask_llm_to_fix_json(s)
+        if fixed_json_str:
+            try:
+                data = json.loads(fixed_json_str)
+                print("Successfully repaired JSON with a one-shot LLM call.")
+                llm_logger.info("Successfully repaired JSON with a one-shot LLM call.")
+                return cast(dict[str, Any], data)
+            except json.JSONDecodeError as e:
+                print(f"LLM-repaired JSON is still invalid: {e}")
+                llm_logger.error(
+                    f"LLM-repaired JSON is still invalid: {e}\nRepaired content:\n{fixed_json_str}"
+                )
+
+        # 5. If all else fails, raise an error.
+        raise ValueError("All attempts to parse and repair the JSON response failed.")
+
+    # --- END: NEW HELPER METHODS ---
+
+    def extract_json(self, content: str) -> Dict[str, Any]:
+        """
+        Extract JSON whether or not the model wrapped it in code fences.
+        (Legacy helper used by JSON-based README path.)
+        """
+        s = content.strip()
+        if s.startswith("```"):
+            # tolerate ```json or ``` wrapping
+            try:
+                s = s.split("```", 1)[1]
+                s = s.split("```", 1)[0]
+            except Exception:
+                pass
+        return cast(dict[str, Any], json.loads(s))
+```
+## File: client_readme.py
+```python
+"""
+OpenRouter AI client for generating PyPI-style search results and READMEs.
+
+- Keeps existing JSON-based README generator for backward compatibility.
+- Adds a new Markdown-first README generator + new FastAPI endpoint sketch.
 """
 
-    def _parse_ai_response(self, content: str, query: str) -> SearchResponse:
-        """Parse the AI response and convert to SearchResponse model."""
-        try:
-            # Try to extract JSON from the response
-            content = content.strip()
-            if content.startswith("```json"):
-                content = content.split("```json")[1].split("```")[0].strip()
-            elif content.startswith("```"):
-                content = content.split("```")[1].split("```")[0].strip()
+from __future__ import annotations
 
-            data = json.loads(content)
+import json
+import random
+from typing import Any, List, Optional
 
-            # Convert to our models
-            results = []
-            for item in data.get("results", []):
-                try:
-                    result = SearchResult(**item)
-                    # Check if the package exists in our cache
-                    result.package_exists = package_cache.package_exists(result.name)
-                    results.append(result)
-                except Exception as e:
-                    print(f"Error parsing result item: {e}")
-                    continue
+from openai import OpenAI
 
-            return SearchResponse(
-                info={"query": query, "count": len(results)}, results=results
-            )
+from .client_base import OpenRouterClientBase
+from .config import config
+from .logger import llm_logger  # <--- IMPORT THE NEW LOGGER
+from .models import ReadmeRequest
 
-        except json.JSONDecodeError as e:
-            print(f"JSON decode error: {e}")
-            print(f"Content: {content}")
-            return SearchResponse()
-        except Exception as e:
-            print(f"Error parsing AI response: {e}")
-            return SearchResponse()
 
-    # --- add inside OpenRouterClient in client.py ---
+class OpenRouterClientReadMe:
+    """Client for interacting with OpenRouter AI service via OpenAI interface."""
 
-    def generate_readme(self, req: "ReadmeRequest") -> str:
+    def __init__(
+        self, api_key: Optional[str] = None, base_url: Optional[str] = None
+    ) -> None:
+        """Initialize the OpenRouter client."""
+        self.api_key = api_key or config.openrouter_api_key
+        self.base_url = base_url or config.openrouter_base_url
+
+        if not self.api_key:
+            raise ValueError("OpenRouter API key is required")
+
+        self.client = OpenAI(
+            api_key=self.api_key,
+            base_url=self.base_url,
+        )
+        self.base = OpenRouterClientBase(api_key, base_url)
+
+    # -----------------
+    # README (OLD JSON-BASED) — retained for backward compatibility
+    # -----------------
+    def generate_readme(self, req: ReadmeRequest) -> str:
         """
-        Ask the LLM for a structured JSON README outline, then render to clean Markdown.
+        OLD WAY: Ask the LLM for a structured JSON README outline, then render to Markdown.
+        Kept for backward compatibility with existing callers.
 
         Returns:
-            Markdown string suitable for README.md (no JSON punctuation).
+            Markdown string suitable for README.md
         """
         prompt = self._build_readme_prompt(req)
 
@@ -707,19 +856,19 @@ Focus on real, popular Python packages that match the search query. Include accu
             )
 
             content = response.choices[0].message.content or ""
-            data = self._extract_json(content)
+            data = self.base.extract_json(content)
             return self._render_readme_markdown(data)
 
         except Exception as e:
             print(f"Error generating README via OpenRouter: {e}")
+            llm_logger.error(
+                f"Error generating README via OpenRouter for '{req.name}': {e}"
+            )
             # Graceful fallback
             return f"# {req.name}\n\n{req.summary or ''}\n\n> README generation failed. Please try again."
 
-    # --- helpers ---
-
-    def _build_readme_prompt(self, req: "ReadmeRequest") -> str:
-        """Builds the README generation prompt with strict JSON schema instructions."""
-        # minimal context → reduce hallucinated sections, still flexible
+    def _build_readme_prompt(self, req: ReadmeRequest) -> str:
+        """Builds the JSON-based README generation prompt (legacy)."""
         return (
             "Draft a comprehensive README as JSON with these keys:\n"
             "{\n"
@@ -744,23 +893,120 @@ Focus on real, popular Python packages that match the search query. Include accu
             f"Project metadata (authoritative): {json.dumps(req.dict(), ensure_ascii=False)}"
         )
 
-    def _extract_json(self, content: str) -> Dict[str, Any]:
+    # -----------------
+    # README (NEW MARKDOWN-FIRST)
+    # -----------------
+    def generate_readme_markdown(self, req: ReadmeRequest) -> str:
         """
-        Extract JSON whether or not the model wrapped it in code fences.
-        """
-        s = content.strip()
-        if s.startswith("```"):
-            # tolerate ```json or ``` wrapping
-            try:
-                s = s.split("```", 1)[1]
-                s = s.split("```", 1)[0]
-            except Exception:
-                pass
-        return json.loads(s)
+        NEW WAY: Ask the LLM to directly produce clean Markdown (no JSON),
+        showing project metadata in a human-readable Markdown block.
 
-    def _render_readme_markdown(self, data: Dict[str, Any]) -> str:
+        Hard rule: The model must **never** tell users to install with `pip install <package>`
+        because PyPI already shows that at the top of the project page.
         """
-        Turn the LLM's JSON into tidy, human-friendly Markdown.
+        prompt = self._build_readme_md_prompt(req)
+
+        try:
+            response = self.client.chat.completions.create(
+                model=config.default_model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a senior Python maintainer and technical writer. "
+                            "Return ONLY a complete, well-structured Markdown README. No JSON, no YAML, no HTML wrappers, no code fences around the entire document."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.5,
+                max_tokens=4000,
+            )
+
+            content = response.choices[0].message.content or ""
+            llm_logger.debug(
+                f"[generate_readme_markdown for {req.name}] RAW LLM RESPONSE:\n---\n{content[:2000]}\n---"
+            )
+            # Best-effort light cleanup: strip stray outer fences if model adds them
+            s = content.strip()
+            if s.startswith("```") and s.endswith("```"):
+                try:
+                    s = s.split("\n", 1)[1]
+                    s = s.rsplit("```", 1)[0]
+                except Exception:
+                    pass
+            return s.strip() + ("\n" if not s.endswith("\n") else "")
+
+        except Exception as e:
+            print(f"Error generating README (markdown) via OpenRouter: {e}")
+            llm_logger.error(
+                f"Error generating README (markdown) via OpenRouter for '{req.name}': {e}"
+            )
+            return f"# {req.name}\n\n{req.summary or ''}\n\n> README generation failed. Please try again."
+
+    def _build_readme_md_prompt(self, req: ReadmeRequest) -> str:
+        """Create a Markdown-first README prompt with randomized, varied guidance."""
+        meta = req.dict()
+
+        # Present metadata as Markdown (not JSON)
+        meta_md: List[str] = [
+            f"**Name:** {meta.get('name','')}",
+            f"**Summary:** {meta.get('summary','')}",
+            f"**Description:** {meta.get('description','')}",
+            f"**Homepage:** {meta.get('homepage','')}",
+            f"**Repository:** {meta.get('repository','')}",
+            f"**Documentation:** {meta.get('documentation','')}",
+            f"**Keywords:** {', '.join(meta.get('keywords', []) or [])}",
+            f"**License:** {meta.get('license','')}",
+            f"**Requires Python:** {meta.get('requires_python','')}",
+        ]
+        meta_block = "\n".join(["### Project Metadata", "", *meta_md])
+
+        # Instruction pool (we'll sample 6–12 each time to avoid repetition)
+        instruction_pool = [
+            "Start with an H1 title and an optional one-line tagline.",
+            "Use short, descriptive badges if appropriate (e.g., shields.io).",
+            "Provide a clear project description focusing on real capabilities.",
+            "List key features in bullet points.",
+            "Add a quickstart section that shows an immediate, minimal example.",
+            "Include usage examples with copy-pasteable code blocks.",
+            "Document configuration options succinctly in bullets or a simple table.",
+            "Explain how to run tests and where to file issues.",
+            "Keep sections concise and scannable; avoid marketing fluff.",
+            "Use fenced code blocks for commands and Python snippets only.",
+            "Include links (Homepage, Repository, Documentation) in a dedicated section.",
+            "Close with License and Contributing notes.",
+            "Avoid suggesting `pip install <package>`; PyPI already shows that prominently.",
+            "Prefer practical examples over long prose; assume intermediate Python users.",
+        ]
+        k = random.randint(6, 12)
+        sampled_instructions = random.sample(instruction_pool, k)
+
+        # Pinned rules — always included
+        pinned_rules = [
+            "Return ONLY a Markdown document (no JSON/YAML wrappers).",
+            "Do NOT say `pip install <package>` anywhere in the document.",
+            "Avoid telling users to `pip install` in any form; assume PyPI page covers installation.",
+            "Keep code blocks minimal and runnable.",
+        ]
+
+        bullet_lines = "\n".join([f"- {line}" for line in sampled_instructions])
+        pinned_lines = "\n".join([f"- {line}" for line in pinned_rules])
+
+        prompt = (
+            f"Create a high-quality README.md in **pure Markdown** for the project below.\n\n"
+            f"{meta_block}\n\n"
+            "Follow these guidelines (varied each time):\n"
+            f"{bullet_lines}\n\n"
+            "Always enforce these rules:\n"
+            f"{pinned_lines}\n\n"
+            "Return only the README content."
+        )
+        return prompt
+
+    def _render_readme_markdown(self, data: dict[str, Any]) -> str:
+        """
+        Turn the LLM's JSON into tidy, human-friendly Markdown. (Legacy path)
         """
 
         def sec(title: str) -> str:
@@ -865,11 +1111,183 @@ Focus on real, popular Python packages that match the search query. Include accu
 
         return "\n".join(lines).strip() + "\n"
 ```
+## File: client_search.py
+```python
+"""
+OpenRouter AI client for generating PyPI-style search results and READMEs.
+
+- Keeps existing JSON-based README generator for backward compatibility.
+- Adds a new Markdown-first README generator + new FastAPI endpoint sketch.
+"""
+
+from __future__ import annotations
+
+from typing import Optional
+
+from openai import OpenAI
+
+from .cache_manager import cache_manager
+from .client_base import OpenRouterClientBase
+from .config import config
+from .logger import llm_logger  # <--- IMPORT THE NEW LOGGER
+from .models import SearchResponse, SearchResult
+from .package_cache import package_cache
+
+
+class OpenRouterClientSearch:
+    """Client for interacting with OpenRouter AI service via OpenAI interface."""
+
+    def __init__(
+        self, api_key: Optional[str] = None, base_url: Optional[str] = None
+    ) -> None:
+        """Initialize the OpenRouter client."""
+        self.api_key = api_key or config.openrouter_api_key
+        self.base_url = base_url or config.openrouter_base_url
+
+        if not self.api_key:
+            raise ValueError("OpenRouter API key is required")
+
+        self.client = OpenAI(
+            api_key=self.api_key,
+            base_url=self.base_url,
+        )
+        self.base = OpenRouterClientBase(api_key, base_url)
+
+    # -----------------
+    # SEARCH
+    # -----------------
+    def search_packages(self, query: str, limit: int = 20) -> SearchResponse:
+        """
+        Search for Python packages using AI knowledge.
+
+        Args:
+            query: Search query for Python packages
+            limit: Maximum number of results to return
+
+        Returns:
+            SearchResponse containing AI-generated package results
+        """
+        prompt = self._build_search_prompt(query, limit)
+
+        try:
+            response = self.client.chat.completions.create(
+                model=config.default_model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a helpful assistant that knows about Python packages on PyPI. "
+                        "You should return realistic package information in the exact JSON format requested.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.7,
+                max_tokens=4000,
+            )
+
+            content = response.choices[0].message.content
+            # --- MODIFICATION START ---
+            llm_logger.debug(
+                f"[Search Query: {query}]\nRAW LLM RESPONSE:\n---\n{content}\n---"
+            )
+            # --- MODIFICATION END ---
+
+            if not content:
+                return SearchResponse()
+
+            # Parse the AI response and convert to our model
+            return self._parse_ai_response(content, query)
+
+        except Exception as e:
+            # Return empty response on error but log it
+            print(f"Error querying OpenRouter for search: {e}")
+            llm_logger.error(f"Error querying OpenRouter for search: {e}")
+            return SearchResponse()
+
+    def _build_search_prompt(self, query: str, limit: int) -> str:
+        """Build the prompt for the AI to generate PyPI search results."""
+        return f"""
+Please search for Python packages related to: "{query}"
+
+Return up to {limit} relevant Python packages in this exact JSON format:
+{{
+    "results": [
+        {{
+            "name": "package-name",
+            "version": "1.0.0",
+            "description": "Brief description of the package",
+            "summary": "One-line summary",
+            "author": "Author Name",
+            "author_email": "author@example.com",
+            "home_page": "https://github.com/author/package",
+            "package_url": "https://pypi.org/project/package-name/",
+            "keywords": "keyword1, keyword2",
+            "license": "MIT",
+            "classifiers": [
+                "Development Status :: 4 - Beta",
+                "Intended Audience :: Developers",
+                "License :: OSI Approved :: MIT License",
+                "Programming Language :: Python :: 3"
+            ],
+            "requires_python": ">=3.7",
+            "project_urls": {{
+                "Homepage": "https://github.com/author/package",
+                "Repository": "https://github.com/author/package",
+                "Documentation": "https://package.readthedocs.io/"
+            }}
+        }}
+    ]
+}}
+
+Focus on real, popular Python packages that match the search query. Include accurate information about versions, authors, and descriptions. If you're not certain about specific details, provide reasonable defaults that match typical PyPI package patterns.
+"""
+
+    def _parse_ai_response(self, content: str, query: str) -> SearchResponse:
+        """Parse the AI response and convert to SearchResponse model."""
+        try:
+            # --- MODIFICATION: Use the new robust parser ---
+            data = self.base.parse_and_repair_json(content)
+
+            # Convert to our models
+            results = []
+            for item in data.get("results", []):
+                try:
+                    result = SearchResult(**item)
+                    # Check if the package exists in our cache
+                    result.package_exists = package_cache.package_exists(result.name)
+                    result.readme_cached = cache_manager.has_readme_by_name(result.name)
+                    result.package_cached = cache_manager.has_package_by_name(
+                        result.name
+                    )
+                    results.append(result)
+                except Exception as e:
+                    print(f"Error parsing result item: {e}")
+                    llm_logger.warning(f"Error parsing result item: {e}\nItem: {item}")
+                    continue
+
+            return SearchResponse(
+                info={"query": query, "count": len(results)}, results=results
+            )
+        except ValueError as e:
+            # This will catch the final failure from the repair function
+            print(
+                f"FATAL: Could not parse or repair AI response for query '{query}'. Error: {e}"
+            )
+            llm_logger.error(
+                f"FATAL: Could not parse or repair AI response for query '{query}'. Error: {e}\nContent:\n{content}"
+            )
+            return SearchResponse()
+        except Exception as e:
+            print(f"An unexpected error occurred parsing AI response: {e}")
+            llm_logger.error(f"An unexpected error occurred parsing AI response: {e}")
+            return SearchResponse()
+```
 ## File: config.py
 ```python
 """
 Configuration management for PAIPI.
 """
+
+from __future__ import annotations
 
 import os
 from typing import Optional
@@ -913,11 +1331,564 @@ class Config:
 # Global configuration instance
 config = Config()
 ```
+## File: generate_package.py
+```python
+#!/usr/bin/env python3
+"""
+Docker Open Interpreter Module
+
+A self-contained module for running Open Interpreter in a Docker container
+to generate Python libraries based on PyPI descriptions and README specifications.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class GenerationConfig:
+    """Configuration for library generation"""
+
+    python_version: str = "3.11"
+    cache_folder: str = "./cache"
+    container_name: Optional[str] = None
+    timeout_seconds: int = 3600  # 1 hour default timeout
+    openai_api_key: Optional[str] = None
+    model: str = "gpt-4"
+    max_retries: int = 3
+
+
+@dataclass
+class LibrarySpec:
+    """Specification for the library to generate"""
+
+    name: str
+    python_version: str
+    pypi_description: str
+    readme_content: str
+    additional_requirements: List[str] | None = None
+
+    def __post_init__(self) -> None:
+        if self.additional_requirements is None:
+            self.additional_requirements = []
+
+
+class DockerOpenInterpreter:
+    """
+    A class to run Open Interpreter in Docker for generating Python libraries.
+    """
+
+    def __init__(self, config: GenerationConfig):
+        self.config = config
+        self.cache_path = Path(config.cache_folder).resolve()
+        self.container_name = (
+            config.container_name or f"oi-generator-{int(time.time())}"
+        )
+
+        # Ensure cache directory exists
+        self.cache_path.mkdir(parents=True, exist_ok=True)
+
+        # Setup logging for this instance
+        self.logger = logging.getLogger(f"{__name__}.{self.container_name}")
+
+        # Validate Docker installation
+        self._validate_docker()
+
+    def _validate_docker(self) -> None:
+        """Validate that Docker is installed and running"""
+        try:
+            result = subprocess.run(
+                ["docker", "--version"], capture_output=True, text=True, check=True
+            )
+            self.logger.info(f"Docker found: {result.stdout.strip()}")
+        except (subprocess.CalledProcessError, FileNotFoundError) as some_error:
+            raise RuntimeError("Docker is not installed or not running") from some_error
+
+    def _create_dockerfile(self, work_dir: Path, python_version: str) -> None:
+        """Create a Dockerfile for the Open Interpreter container"""
+        dockerfile_content = f"""
+FROM python:{python_version}-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \\
+    git \\
+    curl \\
+    build-essential \\
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /workspace
+
+# Install Open Interpreter
+RUN pip install --no-cache-dir open-interpreter
+
+# Create output directory
+RUN mkdir -p /output
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+ENV OPENAI_API_KEY=""
+
+# Default command
+CMD ["python", "-c", "import interpreter; print('Open Interpreter ready')"]
+"""
+
+        dockerfile_path = work_dir / "Dockerfile"
+        dockerfile_path.write_text(dockerfile_content.strip())
+        self.logger.info(f"Created Dockerfile at {dockerfile_path}")
+
+    def _create_generation_script(self, work_dir: Path, spec: LibrarySpec) -> None:
+        """Create the Python script that will run inside the container"""
+        python_version = spec.python_version
+        script_content = f'''
+import os
+import sys
+import json
+import traceback
+from pathlib import Path
+import interpreter
+
+def main():
+    """Main function to generate the Python library"""
+    try:
+        # Configure interpreter
+        interpreter.auto_run = True
+        interpreter.offline = False
+
+        # Set API key if provided
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if api_key:
+            interpreter.llm.api_key = api_key
+
+        # Set model
+        interpreter.llm.model = os.environ.get("MODEL", "gpt-4")
+
+        # Library specification
+        spec = {json.dumps(asdict(spec), indent=2)}
+
+        print("="*50)
+        print("STARTING LIBRARY GENERATION")
+        print("="*50)
+        print(f"Library: {{spec['name']}}")
+        print(f"Python Version: {python_version}")
+        print("="*50)
+
+        # Create the generation prompt
+        prompt = f"""
+I need you to create a complete Python library called '{{spec['name']}}' based on the following specifications:
+
+**PyPI Description:**
+{{spec['pypi_description']}}
+
+**README Content/Additional Requirements:**
+{{spec['readme_content']}}
+
+**Additional Requirements:**
+{{', '.join(spec['additional_requirements']) if spec['additional_requirements'] else 'None'}}
+
+Please create a complete, production-ready Python library with the following structure:
+1. Proper package structure with __init__.py files
+2. Core implementation modules
+3. setup.py or pyproject.toml for packaging
+4. README.md file
+5. requirements.txt if needed
+6. Basic tests in a tests/ directory
+7. Proper documentation and docstrings
+
+Make sure to:
+- Follow Python best practices and PEP 8
+- Include proper error handling
+- Add type hints where appropriate
+- Create meaningful examples in the README
+- Ensure the code is well-documented
+
+Save everything in the /output directory with the proper package structure.
+Start by creating the directory structure, then implement each module step by step.
+"""
+
+        print("Sending prompt to Open Interpreter...")
+        print("-" * 30)
+
+        # Run the generation
+        response = interpreter.chat(prompt)
+
+        print("-" * 30)
+        print("Generation completed!")
+
+        # Create a generation summary
+        summary = {{
+            "library_name": spec['name'],
+            "generation_timestamp": str(datetime.now()),
+            "python_version": "{python_version}",
+            "status": "completed",
+            "output_directory": "/output"
+        }}
+
+        with open("/output/generation_summary.json", "w") as f:
+            json.dump(summary, f, indent=2)
+
+        print("Summary saved to generation_summary.json")
+
+        # List generated files
+        output_path = Path("/output")
+        if output_path.exists():
+            print("\\nGenerated files:")
+            for file_path in output_path.rglob("*"):
+                if file_path.is_file():
+                    print(f"  {{file_path.relative_to(output_path)}}")
+
+    except Exception as e:
+        error_info = {{
+            "error": str(e),
+            "traceback": traceback.format_exc(),
+            "timestamp": str(datetime.now())
+        }}
+
+        print(f"ERROR: {{e}}")
+        print(f"TRACEBACK:\\n{{traceback.format_exc()}}")
+
+        # Save error info
+        try:
+            with open("/output/error_log.json", "w") as f:
+                json.dump(error_info, f, indent=2)
+        except:
+            pass
+
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
+'''
+
+        script_path = work_dir / "generate_library.py"
+        script_path.write_text(script_content)
+        self.logger.info(f"Created generation script at {script_path}")
+
+    def _build_container(self, work_dir: Path) -> None:
+        """Build the Docker container"""
+        self.logger.info(f"Building Docker container: {self.container_name}")
+
+        build_cmd = ["docker", "build", "-t", self.container_name, str(work_dir)]
+
+        try:
+            result = subprocess.run(
+                build_cmd, cwd=work_dir, capture_output=True, text=True, check=True
+            )
+            self.logger.info("Container built successfully")
+            if result.stdout:
+                self.logger.debug(f"Build output: {result.stdout}")
+        except subprocess.CalledProcessError as e:
+            self.logger.error(f"Failed to build container: {e.stderr}")
+            raise RuntimeError(f"Docker build failed: {e.stderr}") from e
+
+    def _run_container(self, work_dir: Path) -> Dict[str, Any]:
+        """Run the container and capture output"""
+        output_dir = self.cache_path / f"output_{int(time.time())}"
+        output_dir.mkdir(exist_ok=True)
+
+        log_file = output_dir / "container.log"
+
+        self.logger.info(f"Running container with output directory: {output_dir}")
+
+        # Prepare environment variables
+        env_vars = []
+        if self.config.openai_api_key:
+            env_vars.extend(["-e", f"OPENAI_API_KEY={self.config.openai_api_key}"])
+        env_vars.extend(["-e", f"MODEL={self.config.model}"])
+
+        run_cmd = (
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--name",
+                f"{self.container_name}_run",
+                "-v",
+                f"{output_dir}:/output",
+                "-v",
+                f"{work_dir / 'generate_library.py'}:/workspace/generate_library.py",
+            ]
+            + env_vars
+            + [self.container_name, "python", "/workspace/generate_library.py"]
+        )
+
+        try:
+            self.logger.info("Starting container execution...")
+
+            with open(log_file, "w", encoding="utf-8") as log_f:
+                with subprocess.Popen(
+                    run_cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                    universal_newlines=True,
+                ) as process:
+
+                    # Stream output in real-time
+                    if process.stdout:
+                        for line in process.stdout:
+                            print(f"[CONTAINER] {line.rstrip()}")
+                            log_f.write(line)
+                            log_f.flush()
+
+                    process.wait(timeout=self.config.timeout_seconds)
+
+                    if process.returncode != 0:
+                        raise subprocess.CalledProcessError(process.returncode, run_cmd)
+
+            self.logger.info("Container execution completed successfully")
+
+            return {
+                "status": "success",
+                "output_directory": str(output_dir),
+                "log_file": str(log_file),
+            }
+
+        except subprocess.TimeoutExpired as te:
+            self.logger.error("Container execution timed out")
+
+            subprocess.run(
+                ["docker", "kill", f"{self.container_name}_run"],
+                capture_output=True,
+                check=True,
+            )
+            raise RuntimeError(
+                f"Container execution timed out after {self.config.timeout_seconds} seconds"
+            ) from te
+
+        except subprocess.CalledProcessError as e:
+            self.logger.error(
+                f"Container execution failed with exit code {e.returncode}"
+            )
+            error_info = {
+                "error": "Container execution failed",
+                "exit_code": e.returncode,
+            }
+
+            # Try to read error logs
+            if log_file.exists():
+                error_info["logs"] = log_file.read_text()
+
+            raise RuntimeError(f"Container execution failed: {error_info}") from e
+
+    def generate_library(self, spec: LibrarySpec) -> Dict[str, Any]:
+        """
+        Generate a Python library using Open Interpreter in Docker
+
+        Args:
+            spec: Library specification including name, description, and requirements
+
+        Returns:
+            Dict containing generation results and paths
+        """
+        self.logger.info(f"Starting library generation for: {spec.name}")
+
+        # Create temporary working directory
+        with tempfile.TemporaryDirectory() as temp_dir:
+            work_dir = Path(temp_dir)
+
+            try:
+                # Create Dockerfile
+                self._create_dockerfile(work_dir, self.config.python_version)
+
+                # Create generation script
+                self._create_generation_script(work_dir, spec)
+
+                # Build container
+                self._build_container(work_dir)
+
+                # Run container
+                result = self._run_container(work_dir)
+
+                # Cleanup container image
+                subprocess.run(
+                    ["docker", "rmi", self.container_name],
+                    capture_output=True,
+                    check=False,
+                )
+
+                self.logger.info("Library generation completed successfully")
+                return result
+
+            except Exception as e:
+                self.logger.error(f"Library generation failed: {e}")
+
+                # Cleanup on failure
+                subprocess.run(
+                    ["docker", "rmi", self.container_name],
+                    capture_output=True,
+                    check=False,
+                )
+
+                raise
+
+    def list_generated_libraries(self) -> List[Dict[str, Any]]:
+        """List all generated libraries in the cache"""
+        libraries = []
+
+        for output_dir in self.cache_path.glob("output_*"):
+            if output_dir.is_dir():
+                summary_file = output_dir / "generation_summary.json"
+                if summary_file.exists():
+
+                    with open(summary_file, encoding="utf-8") as f:
+                        summary = json.load(f)
+                        summary["output_path"] = str(output_dir)
+                        libraries.append(summary)
+
+        return sorted(libraries, key=lambda x: x.get("generation_timestamp", ""))
+
+    def cleanup_cache(self, older_than_days: int = 7) -> int:
+        """Remove old generated libraries from cache"""
+        cutoff_time = time.time() - (older_than_days * 24 * 3600)
+        removed_count = 0
+
+        for output_dir in self.cache_path.glob("output_*"):
+            if output_dir.is_dir():
+                # Extract timestamp from directory name
+                timestamp = int(output_dir.name.split("_")[1])
+                if timestamp < cutoff_time:
+                    shutil.rmtree(output_dir)
+                    removed_count += 1
+                    self.logger.info(f"Removed old cache directory: {output_dir}")
+
+        return removed_count
+
+
+def main() -> None:
+    """Example usage of the DockerOpenInterpreter"""
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Generate Python libraries using Open Interpreter in Docker"
+    )
+    parser.add_argument("--name", required=True, help="Library name")
+    parser.add_argument("--description", required=True, help="PyPI description")
+    parser.add_argument(
+        "--readme", required=True, help="Path to README file or inline content"
+    )
+    parser.add_argument(
+        "--python-version", default="3.11", help="Python version (default: 3.11)"
+    )
+    parser.add_argument("--cache-folder", default="./cache", help="Cache folder path")
+    parser.add_argument("--openai-api-key", help="OpenAI API key")
+    parser.add_argument(
+        "--model", default="gpt-4", help="Model to use (default: gpt-4)"
+    )
+    parser.add_argument("--timeout", type=int, default=3600, help="Timeout in seconds")
+    parser.add_argument("--list", action="store_true", help="List generated libraries")
+    parser.add_argument("--cleanup", type=int, help="Remove cache older than N days")
+
+    args = parser.parse_args()
+
+    config = GenerationConfig(
+        python_version=args.python_version,
+        cache_folder=args.cache_folder,
+        timeout_seconds=args.timeout,
+        openai_api_key=args.openai_api_key or os.environ.get("OPENAI_API_KEY"),
+        model=args.model,
+    )
+
+    interpreter = DockerOpenInterpreter(config)
+
+    if args.list:
+        libraries = interpreter.list_generated_libraries()
+        if libraries:
+            print("Generated libraries:")
+            for lib in libraries:
+                print(f"  - {lib['library_name']} ({lib['generation_timestamp']})")
+                print(f"    Path: {lib['output_path']}")
+        else:
+            print("No generated libraries found.")
+        return
+
+    if args.cleanup is not None:
+        removed = interpreter.cleanup_cache(args.cleanup)
+        print(f"Removed {removed} old cache directories.")
+        return
+
+    # Read README content
+    readme_content = args.readme
+    if Path(args.readme).exists():
+        readme_content = Path(args.readme).read_text(encoding="utf-8")
+
+    python_version = args.python_version
+    # Create library specification
+    spec = LibrarySpec(
+        name=args.name,
+        pypi_description=args.description,
+        readme_content=readme_content,
+        python_version=python_version,
+    )
+
+    try:
+        result = interpreter.generate_library(spec)
+        print("✅ Library generated successfully!")
+        print(f"📁 Output directory: {result['output_directory']}")
+        print(f"📋 Log file: {result['log_file']}")
+    except Exception as e:
+        print(f"❌ Generation failed: {e}")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
+```
+## File: logger.py
+```python
+# paipi/logger.py
+"""
+Dedicated logger for LLM communications.
+"""
+
+import logging
+from pathlib import Path
+
+# Create a 'logs' directory if it doesn't exist
+log_dir = Path("logs")
+log_dir.mkdir(exist_ok=True)
+
+# Create a logger
+llm_logger = logging.getLogger("llm_comms")
+llm_logger.setLevel(logging.DEBUG)
+
+# Create a file handler which logs even debug messages
+fh = logging.FileHandler(log_dir / "llm_communications.log", encoding="utf-8")
+fh.setLevel(logging.DEBUG)
+
+# Create formatter and add it to the handlers
+formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+fh.setFormatter(formatter)
+
+# Add the handlers to the logger
+if not llm_logger.handlers:
+    llm_logger.addHandler(fh)
+```
 ## File: main.py
 ```python
 """
 FastAPI application for PAIPI - AI-powered PyPI search.
 """
+
+from __future__ import annotations
 
 import asyncio
 import os
@@ -926,18 +1897,32 @@ from typing import Any, Dict, Optional
 
 from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
+from pydantic import BaseModel
 from starlette.middleware.cors import CORSMiddleware
 
 from .cache_manager import cache_manager
-from .client import OpenRouterClient
+from .client_readme import OpenRouterClientReadMe
+from .client_search import OpenRouterClientSearch
 from .config import config
 from .models import (
     PackageGenerateRequest,
     ReadmeRequest,
-    ReadmeResponse,
     SearchResponse,
+    SearchResult,
 )
 from .package_cache import CACHE_DB_PATH, package_cache
+from .pypi_scraper import PypiScraper
+
+
+class AvailabilityRequest(BaseModel):
+    names: list[str]
+
+
+class AvailabilityResponseItem(BaseModel):
+    name: str
+    package_cached: bool
+    readme_cached: bool
+
 
 # Create FastAPI app
 app = FastAPI(
@@ -970,12 +1955,12 @@ app.add_middleware(
 
 # --- STARTUP & SHUTDOWN EVENTS ---
 @app.on_event("startup")
-async def startup_event():
+async def startup_event() -> None:
     """On startup, intelligently load and update the package cache."""
     loop = asyncio.get_event_loop()
 
     # This helper runs synchronous checks in a thread to not block the event loop
-    def check_cache_status():
+    def check_cache_status() -> str:
         if not CACHE_DB_PATH.exists():
             return "missing"
         if not package_cache.has_data():
@@ -1018,7 +2003,7 @@ async def startup_event():
 
 
 @app.on_event("shutdown")
-def shutdown_event():
+def shutdown_event() -> None:
     """Close database connections on shutdown."""
     package_cache.close()
     cache_manager.close()
@@ -1028,12 +2013,11 @@ def shutdown_event():
 # --- END STARTUP & SHUTDOWN EVENTS ---
 
 # Initialize OpenRouter client
-try:
-    config.validate()
-    ai_client = OpenRouterClient()
-except ValueError as e:
-    print(f"Configuration error: {e}")
-    ai_client = None
+config.validate()
+ai_client = OpenRouterClientSearch()
+readme_client = OpenRouterClientReadMe()
+
+pypi_scraper = PypiScraper()
 
 
 @app.get("/")
@@ -1078,18 +2062,18 @@ async def search_packages(
     ),
 ) -> SearchResponse:
     """
-    Search for Python packages using AI knowledge with caching.
+    Search for Python packages using AI knowledge, augmented with live PyPI data.
 
-    This endpoint mimics the PyPI search API but uses AI to generate results
-    based on its knowledge of Python packages. Results are cached for faster
-    subsequent requests.
+    This endpoint uses AI to generate a list of relevant packages, then verifies
+    each one against the official PyPI API. Real packages are updated with live
+    metadata, while non-existent ones remain as AI suggestions. Results are cached.
 
     Args:
-        q: Search query string (empty string returns all cached results)
-        size: Maximum number of results to return (1-100)
+        q: Search query string.
+        size: Maximum number of results to return (1-100).
 
     Returns:
-        SearchResponse with AI-generated package results in PyPI format
+        SearchResponse with AI-generated and PyPI-verified package results.
     """
     if not ai_client:
         raise HTTPException(
@@ -1143,22 +2127,65 @@ async def search_packages(
     # Generate new results via AI
     try:
         loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            None, lambda: ai_client.search_packages(query, size)
+        # 1. Get initial results from the AI
+        ai_response = await loop.run_in_executor(
+            None, lambda: ai_client.search_packages(query, size or 20)
         )
 
-        # Cache the results
+        # Helper to augment a single result with real PyPI data
+        async def augment_result(search_result: SearchResult) -> None:
+            real_metadata = await pypi_scraper.get_project_metadata(search_result.name)
+            if real_metadata and "info" in real_metadata:
+                info = real_metadata["info"]
+                search_result.package_exists = True
+                search_result.version = info.get("version", search_result.version)
+                search_result.summary = info.get("summary", search_result.summary)
+                search_result.description = info.get("summary", search_result.summary)
+                # search_result.description = info.get(
+                #     "description", search_result.description
+                # )
+                search_result.author = info.get("author", search_result.author)
+                search_result.author_email = info.get(
+                    "author_email", search_result.author_email
+                )
+                search_result.home_page = info.get("home_page", search_result.home_page)
+                search_result.license = info.get("license", search_result.license)
+                search_result.requires_python = info.get(
+                    "requires_python", search_result.requires_python
+                )
+                search_result.package_url = info.get(
+                    "package_url", search_result.package_url
+                )
+                search_result.project_urls = info.get(
+                    "project_urls", search_result.project_urls
+                )
+                search_result.readme_cached = await loop.run_in_executor(
+                    None, lambda: cache_manager.has_readme_by_name(search_result.name)
+                )
+                search_result.package_cached = await loop.run_in_executor(
+                    None, lambda: cache_manager.has_package_by_name(search_result.name)
+                )
+            else:
+                search_result.package_exists = False
+                search_result.readme_cached = False
+                search_result.package_cached = False
+
+        # 2. Augment all results concurrently
+        if ai_response.results:
+            tasks = [augment_result(res) for res in ai_response.results]
+            await asyncio.gather(*tasks)
+
+        # 3. Cache the augmented results
         await loop.run_in_executor(
-            None, lambda: cache_manager.cache_search_results(query, result)
+            None, lambda: cache_manager.cache_search_results(query, ai_response)
         )
-
-        return result
+        return ai_response
 
     except Exception as e:
         print(f"Search error: {e}")
         raise HTTPException(
             status_code=500, detail="An error occurred while searching for packages"
-        )
+        ) from e
 
 
 # --- add endpoints in main.py ---
@@ -1203,7 +2230,10 @@ async def generate_readme(req: ReadmeRequest = Body(...)) -> PlainTextResponse:
     try:
         loop = asyncio.get_event_loop()
         markdown = await loop.run_in_executor(
-            None, lambda: ai_client.generate_readme(req)
+            None, lambda: readme_client.generate_readme(req)
+        )
+        markdown = await loop.run_in_executor(
+            None, lambda: readme_client.generate_readme_markdown(req)
         )
 
         # Cache the results
@@ -1218,7 +2248,7 @@ async def generate_readme(req: ReadmeRequest = Body(...)) -> PlainTextResponse:
         print(f"README generation error: {e}")
         raise HTTPException(
             status_code=500, detail="An error occurred while generating README"
-        )
+        ) from e
 
 
 @app.post(
@@ -1255,9 +2285,9 @@ async def generate_package(
         )
 
         if cached_zip:
-            from io import BytesIO
-
-            zip_io = BytesIO(cached_zip)
+            # What was intended here?
+            # from io import BytesIO
+            # _zip_io = BytesIO(cached_zip)
             return StreamingResponse(
                 iter([cached_zip]),
                 media_type="application/zip",
@@ -1294,7 +2324,7 @@ async def generate_package(
         print(f"Package generation error: {e}")
         raise HTTPException(
             status_code=500, detail="An error occurred while generating package"
-        )
+        ) from e
 
 
 @app.get("/cache/stats")
@@ -1337,8 +2367,78 @@ async def clear_cache(
         return {"status": "error", "message": str(e)}
 
 
+@app.get("/availability")
+async def availability(
+    name: str = Query(..., description="Package name")
+) -> Dict[str, Any]:
+    """Return whether README and package ZIP are already cached for a name."""
+    loop = asyncio.get_event_loop()
+    readme_cached, package_cached = await asyncio.gather(
+        loop.run_in_executor(None, lambda: cache_manager.has_readme_by_name(name)),
+        loop.run_in_executor(None, lambda: cache_manager.has_package_by_name(name)),
+    )
+    return {
+        "name": name,
+        "readme_cached": bool(readme_cached),
+        "package_cached": bool(package_cached),
+    }
+
+
+@app.post("/availability/batch")
+async def availability_batch(payload: AvailabilityRequest) -> Dict[str, Any]:
+    """Batch availability check for multiple names."""
+    loop = asyncio.get_event_loop()
+    results: list[Dict[str, Any]] = []
+    for n in payload.names:
+        readme_cached, package_cached = await asyncio.gather(
+            loop.run_in_executor(
+                None,
+                lambda n=n: cache_manager.has_readme_by_name(n),  # type: ignore[misc]
+            ),
+            loop.run_in_executor(
+                None,
+                lambda n=n: cache_manager.has_package_by_name(n),  # type: ignore[misc]
+            ),
+        )
+        results.append(
+            {
+                "name": n,
+                "readme_cached": bool(readme_cached),
+                "package_cached": bool(package_cached),
+            }
+        )
+    return {"items": results}
+
+
+@app.get(
+    "/readme/by-name/{name}",
+    response_class=PlainTextResponse,
+    responses={
+        200: {"content": {"text/markdown": {}}},
+        404: {"description": "Not found"},
+    },
+)
+async def get_readme_by_name(name: str) -> PlainTextResponse:
+    """Return the most recent cached README for a package name, if present."""
+    loop = asyncio.get_event_loop()
+    md = await loop.run_in_executor(
+        None, lambda: cache_manager.get_readme_by_name(name)
+    )
+    if not md:
+        raise HTTPException(status_code=404, detail="README not found for this package")
+    return PlainTextResponse(content=md, media_type="text/markdown")
+
+
+@app.get("/search/history")
+async def search_history() -> Dict[str, Any]:
+    """Return saved past searches with timestamps and result counts."""
+    loop = asyncio.get_event_loop()
+    hist = await loop.run_in_executor(None, cache_manager.get_search_history)
+    return {"items": hist}
+
+
 @app.exception_handler(404)
-async def not_found_handler(request, exc) -> JSONResponse:
+async def not_found_handler(_request: Any, _exc: Any) -> JSONResponse:
     """Custom 404 handler."""
     return JSONResponse(
         status_code=404,
@@ -1375,6 +2475,8 @@ if __name__ == "__main__":
 """
 Pydantic models for PyPI-shaped API responses with type hints.
 """
+
+from __future__ import annotations
 
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -1465,6 +2567,13 @@ class SearchResult(BaseModel):
         False,
         description="Whether the package name exists on PyPI according to the local cache.",
     )
+    readme_cached: bool = Field(
+        False,
+        description="Whether a README has been generated and cached for this package.",
+    )
+    package_cached: bool = Field(
+        False, description="Whether a generated package ZIP is cached for this package."
+    )
 
 
 class SearchResponse(BaseModel):
@@ -1523,6 +2632,8 @@ stores them in an SQLite database, and provides a fast, in-memory check
 to verify if a package name is legitimate.
 """
 
+from __future__ import annotations
+
 import re
 import sqlite3
 from pathlib import Path
@@ -1543,7 +2654,7 @@ class PackageCache:
     _connection: sqlite3.Connection | None = None
     _package_names: Set[str] | None = None
 
-    def __new__(cls, db_path: Path = CACHE_DB_PATH):
+    def __new__(cls, db_path: Path = CACHE_DB_PATH) -> PackageCache:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._db_path = db_path
@@ -1573,7 +2684,7 @@ class PackageCache:
             print(f"Database error during initialization: {e}")
             self._connection = None
 
-    def load_into_memory(self):
+    def load_into_memory(self) -> None:
         """Load all package names from DB into a set for fast lookups."""
         if self._package_names is not None:
             return  # Already loaded
@@ -1659,7 +2770,7 @@ class PackageCache:
 
         return normalized_name in self._package_names if self._package_names else False
 
-    def close(self):
+    def close(self) -> None:
         """Closes the database connection."""
         if self._connection:
             self._connection.close()
@@ -1668,4 +2779,231 @@ class PackageCache:
 
 # Global instance to be used across the application
 package_cache = PackageCache()
+```
+## File: pypi_scraper.py
+```python
+"""
+PyPI Scraper client for fetching package metadata from the official JSON API.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from typing import Any, Dict, List, Optional, cast
+
+import pypi_json
+from packaging.requirements import InvalidRequirement
+from pydantic import ValidationError
+from requests import HTTPError
+
+from .models import (
+    PackageFile,
+    PackageRelease,
+    ProjectDetails,
+    ProjectUrls,
+)
+
+# Set up a logger for this module, following existing patterns.
+scraper_logger = logging.getLogger(__name__)
+# Basic config for demonstration if not configured elsewhere
+logging.basicConfig(level=logging.INFO)
+
+
+class PypiScraper:
+    """
+    A client to fetch and parse package information from the official PyPI JSON API.
+    """
+
+    def __init__(self) -> None:
+        """Initialize the scraper client."""
+        # The pypi_json library is synchronous and class-based.
+        # We create one instance to reuse its internal requests.Session.
+        self.client = pypi_json.PyPIJSON()
+
+    async def get_project_metadata(
+        self, package_name: str, version: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Fetches the raw JSON metadata for a package from PyPI.
+
+        Args:
+            package_name: The name of the package.
+            version: Optional specific version of the package. If None, gets latest.
+
+        Returns:
+            A dictionary with the raw package metadata, or None if not found.
+        """
+        loop = asyncio.get_event_loop()
+        try:
+            scraper_logger.info(
+                f"Fetching metadata for '{package_name}'"
+                f"{' version ' + version if version else ' (latest)'}..."
+            )
+            # The pypi_json library is synchronous, so we run it in an executor
+            # to avoid blocking the asyncio event loop.
+            metadata_obj = await loop.run_in_executor(
+                None, lambda: self.client.get_metadata(package_name, version)
+            )
+
+            # The returned object is a NamedTuple; convert it to a dict
+            # to match the expected return type used in main.py.
+            return metadata_obj._asdict()
+
+        except InvalidRequirement:
+            # This exception is raised by pypi_json for 404s.
+            scraper_logger.warning(
+                f"Package '{package_name}'"
+                f"{' version ' + version if version else ''} not found on PyPI."
+            )
+            return None
+        except HTTPError as e:
+            # pypi_json uses requests, which raises HTTPError.
+            scraper_logger.error(
+                f"HTTP error fetching '{package_name}': {e.response.status_code} - {e}"
+            )
+            return None
+        except Exception as e:
+            scraper_logger.error(
+                f"An unexpected error occurred while fetching '{package_name}': {e}"
+            )
+            return None
+
+    async def get_project_details(self, package_name: str) -> Optional[ProjectDetails]:
+        """
+        Fetches detailed information for the latest version of a package.
+
+        Args:
+            package_name: The name of the package.
+
+        Returns:
+            A ProjectDetails model instance, or None if the package is not found
+            or parsing fails.
+        """
+        metadata = await self.get_project_metadata(package_name)
+        if not metadata or "info" not in metadata:
+            return None
+
+        info = metadata["info"]
+        try:
+            project_urls_data = info.get("project_urls")
+            project_urls = (
+                ProjectUrls(**project_urls_data) if project_urls_data else None
+            )
+
+            details = ProjectDetails(
+                author=info.get("author"),
+                author_email=info.get("author_email"),
+                maintainer=info.get("maintainer"),
+                maintainer_email=info.get("maintainer_email"),
+                license=info.get("license"),
+                keywords=info.get("keywords"),
+                classifiers=info.get("classifiers", []),
+                requires_python=info.get("requires_python"),
+                project_urls=project_urls,
+                summary=info.get("summary"),
+                platform=info.get("platform"),
+            )
+            return details
+        except ValidationError as e:
+            scraper_logger.error(
+                f"Pydantic validation failed for '{package_name}': {e}"
+            )
+            return None
+
+    async def get_project_readme(self, package_name: str) -> Optional[str]:
+        """
+        Fetches only the project's long description (README).
+
+        This is typically the full README content in Markdown or reStructuredText.
+        It's separate from the short 'summary'.
+
+        Args:
+            package_name: The name of the package.
+
+        Returns:
+            The long description string, or None if not found.
+        """
+        metadata = await self.get_project_metadata(package_name)
+        if metadata and "info" in metadata:
+            return cast(Optional[str], metadata["info"].get("description"))
+        return None
+
+    async def get_all_releases(self, package_name: str) -> List[PackageRelease]:
+        """
+        Gets a list of all releases for a given package.
+
+        Args:
+            package_name: The name of the package.
+
+        Returns:
+            A list of PackageRelease objects.
+        """
+        # Fetch metadata for the project (not a specific version) to get all releases
+        metadata = await self.get_project_metadata(package_name)
+        if not metadata or not metadata.get("releases"):
+            return []
+
+        releases = []
+        for version, release_files in metadata["releases"].items():
+            if not release_files:
+                continue
+
+            is_yanked = all(f.get("yanked", False) for f in release_files)
+            yanked_reason = release_files[0].get("yanked_reason") if is_yanked else None
+            upload_time = release_files[0].get("upload_time_iso_8061")
+
+            releases.append(
+                PackageRelease(
+                    version=version,
+                    yanked=is_yanked,
+                    yanked_reason=yanked_reason,
+                    upload_time=upload_time,
+                )
+            )
+        return releases
+
+    async def get_release_files(
+        self, package_name: str, version: str = "latest"
+    ) -> List[PackageFile]:
+        """
+        Gets all package files for a specific version of a package.
+
+        Args:
+            package_name: The name of the package.
+            version: The version string. Defaults to 'latest' to get the newest.
+
+        Returns:
+            A list of PackageFile objects for the specified version.
+        """
+        fetch_version = None if version == "latest" else version
+        metadata = await self.get_project_metadata(package_name, version=fetch_version)
+
+        if not metadata:
+            return []
+
+        # The files are under the 'urls' key in the JSON response
+        files_data = metadata.get("urls", [])
+        package_files = []
+        try:
+            for file_info in files_data:
+                package_files.append(
+                    PackageFile(
+                        filename=file_info.get("filename"),
+                        url=file_info.get("url"),
+                        hashes=file_info.get("digests", {}),
+                        requires_python=file_info.get("requires_python"),
+                        yanked=file_info.get("yanked", False),
+                        yanked_reason=file_info.get("yanked_reason"),
+                        upload_time=file_info.get("upload_time_iso_8601"),
+                        size=file_info.get("size"),
+                        packagetype=file_info.get("packagetype", "sdist"),
+                    )
+                )
+            return package_files
+        except ValidationError as e:
+            scraper_logger.error(
+                f"Pydantic validation failed for files of '{package_name}': {e}"
+            )
+            return []
 ```

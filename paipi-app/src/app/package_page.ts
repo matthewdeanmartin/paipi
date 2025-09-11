@@ -1,150 +1,24 @@
-import {ChangeDetectionStrategy, Component, computed, EventEmitter, inject, Input, Output, signal} from '@angular/core';
-import {HttpClient, HttpErrorResponse} from '@angular/common/http';
-import {DomSanitizer, SafeHtml} from '@angular/platform-browser';
-import {firstValueFrom} from 'rxjs';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  EventEmitter,
+  inject,
+  Input,
+  OnInit,
+  Output, // <-- Import Output
+  signal
+} from '@angular/core';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
+import { firstValueFrom } from 'rxjs';
 
 @Component({
   selector: 'app-package-detail',
   standalone: true,
   imports: [],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  template: `
-    <div class="bg-gray-800 border border-gray-700 rounded-lg p-6 animate-fade-in">
-      <!-- Back Button -->
-      <button (click)="close.emit()"
-              class="mb-6 bg-gray-700 hover:bg-gray-600 text-gray-200 px-4 py-2 rounded-lg transition-colors flex items-center gap-2">
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
-             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="19" y1="12" x2="5" y2="12"></line>
-          <polyline points="12 19 5 12 12 5"></polyline>
-        </svg>
-        Back to Search
-      </button>
-
-      <!-- Header -->
-      <div class="flex flex-col sm:flex-row justify-between items-start gap-4 mb-4">
-        <div>
-          <h2 class="text-3xl font-bold" [class.text-red-500]="!package.package_exists"
-              [class.text-blue-400]="package.package_exists">
-            {{ package.name }}
-            @if (!package.package_exists) {
-              <span class="text-sm align-middle">(Package not found on PyPI)</span>
-            }
-          </h2>
-          <p class="text-gray-400 mt-1">{{ package.summary }}</p>
-        </div>
-        <span
-          class="text-sm font-mono bg-gray-700 text-yellow-300 px-3 py-1 rounded-md flex-shrink-0">{{ package.version }}</span>
-      </div>
-
-      <p class="text-gray-300 mb-6">{{ package.description }}</p>
-
-      <!-- Metadata Grid -->
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-6 border-t border-gray-700 pt-6">
-        <div>
-          <h3 class="text-lg font-semibold text-gray-200 mb-3">Details</h3>
-          <dl class="space-y-2 text-sm">
-            @if (package.author) {
-              <div class="grid grid-cols-3 gap-1">
-                <dt class="text-gray-500">Author</dt>
-                <dd class="col-span-2 text-gray-300">{{ package.author }}</dd>
-              </div>
-            }
-            @if (package.license) {
-              <div class="grid grid-cols-3 gap-1">
-                <dt class="text-gray-500">License</dt>
-                <dd class="col-span-2 text-gray-300">{{ package.license }}</dd>
-              </div>
-            }
-            @if (package.requires_python) {
-              <div class="grid grid-cols-3 gap-1">
-                <dt class="text-gray-500">Requires</dt>
-                <dd class="col-span-2 text-gray-300">Python {{ package.requires_python }}</dd>
-              </div>
-            }
-          </dl>
-        </div>
-        <div>
-          <h3 class="text-lg font-semibold text-gray-200 mb-3">Links</h3>
-          <div class="flex flex-col space-y-2 text-sm">
-            @if (package.home_page) {
-              <a [href]="package.home_page" target="_blank" rel="noopener noreferrer"
-                 class="text-blue-400 hover:underline">Homepage</a>
-            }
-            @if (package.package_url) {
-              <a [href]="package.package_url" target="_blank" rel="noopener noreferrer"
-                 class="text-blue-400 hover:underline">PyPI Package URL</a>
-            }
-            @if (package.project_urls?.['Documentation']) {
-              <a [href]="package.project_urls?.['Documentation']" target="_blank" rel="noopener noreferrer"
-                 class="text-blue-400 hover:underline">Documentation</a>
-            }
-          </div>
-        </div>
-      </div>
-
-      <!-- Keywords -->
-      @if (splitKeywords(package.keywords).length > 0) {
-        <div class="mt-6 pt-6 border-t border-gray-700">
-          <h3 class="text-lg font-semibold text-gray-200 mb-3">Keywords</h3>
-          <div class="flex flex-wrap gap-2">
-            @for (keyword of splitKeywords(package.keywords); track $index) {
-              <span class="text-xs bg-blue-900/50 text-blue-300 px-2 py-1 rounded-full">{{ keyword }}</span>
-            }
-          </div>
-        </div>
-      }
-
-      <!-- README Generation -->
-      <div class="mt-6 pt-6 border-t border-gray-700">
-        <h3 class="text-lg font-semibold text-gray-200 mb-3">README.md</h3>
-
-        @if (readmeIsLoading()) {
-          <div class="flex items-center gap-3 text-gray-400 p-4 bg-gray-800 rounded-md">
-            <svg class="animate-spin h-5 w-5 text-blue-400" xmlns="http://www.w3.org/2000/svg" fill="none"
-                 viewBox="0 0 24 24">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-              <path class="opacity-75" fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
-            <span>Generating README with AI...</span>
-          </div>
-        } @else if (safeReadmeHtml()) {
-          <div class="prose prose-sm prose-invert bg-gray-900/50 p-4 rounded-md border border-gray-600 max-w-none">
-            <div [innerHTML]="safeReadmeHtml()"></div>
-          </div>
-          <div class="mt-6 flex gap-4">
-            <button (click)="onDownloadPackage()" [disabled]="packageIsLoading()"
-                    class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded-lg transition-colors flex items-center justify-center w-48 disabled:opacity-50 disabled:cursor-not-allowed">
-              @if (packageIsLoading()) {
-                <svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                  <path class="opacity-75" fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-              } @else {
-                <span>Download Package</span>
-              }
-            </button>
-            <button (click)="resetReadme()"
-                    class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg transition-colors">
-              Regenerate
-            </button>
-          </div>
-        } @else {
-          <p class="text-gray-400 text-sm mb-4">Click the button below to generate a README.md file for this
-            package.</p>
-          <button (click)="onGenerateReadme()"
-                  class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded-lg transition-colors">
-            Generate README.md
-          </button>
-          @if (readmeError()) {
-            <p class="text-red-400 mt-2">{{ readmeError() }}</p>
-          }
-        }
-      </div>
-    </div>
-  `,
+  templateUrl: './package_page.html', // We'll use a separate template file for clarity
   styles: [`
     .animate-fade-in {
       animation: fadeIn 0.5s ease-in-out;
@@ -156,9 +30,12 @@ import {firstValueFrom} from 'rxjs';
     }
   `]
 })
-export class PackageDetailComponent {
+// Implement the OnInit interface
+export class PackageDetailComponent implements OnInit {
   @Input({ required: true }) package!: SearchResult;
   @Output() close = new EventEmitter<void>();
+  // --- NEW: Event emitter to notify the parent component ---
+  @Output() readmeGenerated = new EventEmitter<string>();
 
   private http = inject(HttpClient);
   private sanitizer = inject(DomSanitizer);
@@ -178,7 +55,42 @@ export class PackageDetailComponent {
     return null;
   });
 
+  // --- NEW: ngOnInit Lifecycle Hook ---
+  ngOnInit(): void {
+    console.log(`[PackageDetail] ngOnInit for '${this.package.name}'. Checking live availability from server...`);
+    this.checkAndLoadCachedReadme();
+  }
+
+  async checkAndLoadCachedReadme(): Promise<void> {
+    this.readmeIsLoading.set(true);
+    this.readmeError.set(null);
+    this.readmeContent.set(null);
+
+    try {
+      const availabilityUrl = `${this.apiUrl}/availability?name=${encodeURIComponent(this.package.name)}`;
+      console.log(`[PackageDetail] Checking availability at: ${availabilityUrl}`);
+      const availability = await firstValueFrom(this.http.get<AvailabilityResponse>(availabilityUrl));
+
+      if (availability.readme_cached) {
+        console.log(`[PackageDetail] README is cached on server. Fetching content...`);
+        const readmeUrl = `${this.apiUrl}/readme/by-name/${encodeURIComponent(this.package.name)}`;
+        const markdown = await firstValueFrom(this.http.get(readmeUrl, { responseType: 'text' }));
+        this.readmeContent.set(markdown);
+      } else {
+        console.log(`[PackageDetail] README is not cached on server. Waiting for user to generate.`);
+      }
+    } catch (err: any) {
+      console.error("Failed to check/load cached README:", err);
+      this.readmeError.set(err.error?.detail || err.message || 'Could not check for cached README.');
+    } finally {
+      this.readmeIsLoading.set(false);
+    }
+  }
+
   async onGenerateReadme(): Promise<void> {
+    // --- NEW: Add logging for debugging ---
+    console.log(`[PackageDetail] Generating new README for '${this.package.name}'...`);
+
     this.readmeIsLoading.set(true);
     this.readmeError.set(null);
     this.readmeContent.set(null);
@@ -194,8 +106,13 @@ export class PackageDetailComponent {
     };
 
     try {
-      const markdown = await firstValueFrom(this.http.post(`${this.apiUrl}/readme`, payload, {responseType: 'text'}));
+      const markdown = await firstValueFrom(this.http.post(`${this.apiUrl}/readme`, payload, { responseType: 'text' }));
       this.readmeContent.set(markdown);
+
+      // --- NEW: Emit event to parent on success ---
+      console.log(`[PackageDetail] Emitting readmeGenerated event for '${this.package.name}'`);
+      this.readmeGenerated.emit(this.package.name);
+
     } catch (err: any) {
       console.error("README Generation Error:", err);
       this.readmeError.set(err.error?.detail || err.message || 'Failed to generate README.');
@@ -211,11 +128,11 @@ export class PackageDetailComponent {
     this.packageIsLoading.set(true);
     const payload: PackageGenerateRequest = {
       readme_markdown: markdown,
-      metadata: {...this.package}
+      metadata: { ...this.package }
     };
 
     try {
-      const blob = await firstValueFrom(this.http.post(`${this.apiUrl}/generate_package`, payload, {responseType: 'blob'}));
+      const blob = await firstValueFrom(this.http.post(`${this.apiUrl}/generate_package`, payload, { responseType: 'blob' }));
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
