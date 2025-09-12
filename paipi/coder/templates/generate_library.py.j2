@@ -1,0 +1,128 @@
+{# generate_library.py.j2 #}
+import os
+import sys
+import json
+import traceback
+from pathlib import Path
+from datetime import datetime
+from interpreter import interpreter
+
+def main():
+    """Main function to generate the Python library"""
+    # Ensure we write into the mounted output directory
+    os.chdir('/output')
+
+    try:
+        # Configure interpreter
+        interpreter.auto_run = True
+        interpreter.offline = False
+
+        # Set API key if provided
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if api_key:
+            interpreter.api_key = api_key
+
+        # Set model (env wins, else default)
+        interpreter.model = os.environ.get("MODEL", "gpt-4")
+
+        # Library specification injected by template
+        spec_py = {{ spec | tojson(indent=2) }}
+        python_version = {{ python_version | tojson }}
+
+        print("="*50)
+        print("STARTING LIBRARY GENERATION")
+        print("="*50)
+        print(f"Library: {spec_py['name']}")
+        print(f"Python Version: {python_version}")
+        print("="*50)
+
+        {% raw %}
+        # Create the generation prompt (use f-string to reference spec_py/python_version)
+        prompt = f"""
+I need you to create a complete Python library called '{spec_py['name']}' based on the following specifications:
+
+**PyPI Description:**
+{spec_py['pypi_description']}
+
+**README Content/Additional Requirements:**
+{spec_py['readme_content']}
+
+**Additional Requirements:**
+{', '.join(spec_py.get('additional_requirements', []) or []) or 'None'}
+
+Please create a complete, production-ready Python library with the following structure:
+1. Proper package structure with __init__.py files
+2. Core implementation modules
+3. pyproject.toml for packaging
+4. README.md file
+5. requirements.txt if needed
+6. Basic tests in a tests/ directory
+7. Proper documentation and docstrings
+8. Confirm that you actually wrote to the files by running `cat filename.py`
+
+Make sure to:
+- Follow Python best practices and PEP 8
+- Include proper error handling
+- Add type hints where appropriate
+- Create meaningful examples in the README
+- Ensure the code is well-documented
+
+Target Python version: {python_version}
+
+Save everything in the current directory (this is the designated output directory).
+Start by creating the directory structure for '{spec_py['name']}', then implement each module step by step.
+"""
+        {% endraw %}
+
+        print("Sending prompt to Open Interpreter...")
+        print("-" * 30)
+
+        # Run the generation
+        response = interpreter.chat(prompt)
+
+        print("-" * 30)
+        print("Generation completed!")
+
+        # Create a generation summary
+        summary = {
+            "library_name": spec_py['name'],
+            "generation_timestamp": str(datetime.now()),
+            "python_version": python_version,
+            "status": "completed",
+            "output_directory": "/output"
+        }
+
+        with open("generation_summary.json", "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=2)
+
+        print("Summary saved to generation_summary.json")
+
+        # List generated files
+        output_path = Path(".")
+        if output_path.exists():
+            print("\nGenerated files:")
+            for file_path in output_path.rglob("*"):
+                if file_path.is_file():
+                    print(f"  {file_path}")
+
+    except Exception as e:
+        error_info = {
+            "error": str(e),
+            "traceback": traceback.format_exc(),
+            "timestamp": str(datetime.now())
+        }
+
+        print(f"ERROR: {e}")
+        print(f"TRACEBACK:\n{traceback.format_exc()}")
+
+        # Save error info
+        try:
+            with open("error_log.json", "w", encoding="utf-8") as f:
+                json.dump(error_info, f, indent=2)
+        except Exception:
+            pass
+
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()

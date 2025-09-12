@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Docker Open Interpreter Module
 
@@ -8,12 +7,13 @@ to generate Python libraries based on PyPI descriptions and README specification
 
 from __future__ import annotations
 
+import re
+
+from jinja2 import Environment, FileSystemLoader, ChoiceLoader, StrictUndefined
 import json
 import logging
-import os
 import shutil
 import subprocess
-import sys
 import tempfile
 import time
 from dataclasses import asdict, dataclass
@@ -119,132 +119,59 @@ CMD ["python", "-c", "import interpreter; print('Open Interpreter ready')"]
         dockerfile_path.write_text(dockerfile_content.strip())
         self.logger.info(f"Created Dockerfile at {dockerfile_path}")
 
-    def _create_generation_script(self, work_dir: Path, spec: LibrarySpec) -> None:
-        """Create the Python script that will run inside the container"""
-        python_version = spec.python_version
-        script_content = f'''
-import os
-import sys
-import json
-import traceback
-from pathlib import Path
-import interpreter
+    from dataclasses import asdict
+    from pathlib import Path
+    from jinja2 import Environment, FileSystemLoader, ChoiceLoader, StrictUndefined
 
-def main():
-    """Main function to generate the Python library"""
-    try:
-        # Configure interpreter
-        interpreter.auto_run = True
-        interpreter.offline = False
+    def _create_generation_script(self, work_dir: Path, spec: LibrarySpec) -> Path:
+        """
+        Render generate_library.py from the Jinja2 template generate_library.py.j2
+        and write it to the working directory so the container can execute it.
 
-        # Set API key if provided
-        api_key = os.environ.get("OPENAI_API_KEY")
-        if api_key:
-            interpreter.llm.api_key = api_key
+        Returns:
+            Path to the rendered script.
+        """
+        # Where to look for the template:
+        # 1) a local "templates" folder next to this module
+        # 2) this module's folder (if you keep the .j2 next to the file)
+        # 3) current working directory as a final fallback
+        module_dir = Path(__file__).parent.resolve()
+        search_paths = [
+            module_dir / "templates",
+            module_dir,
+            Path.cwd(),
+        ]
 
-        # Set model
-        interpreter.llm.model = os.environ.get("MODEL", "gpt-4")
+        env = Environment(
+            loader=ChoiceLoader([FileSystemLoader(str(p)) for p in search_paths]),
+            autoescape=False,
+            undefined=StrictUndefined,  # fail fast if a variable is missing
+            trim_blocks=True,
+            lstrip_blocks=True,
+        )
 
-        # Library specification
-        spec = {json.dumps(asdict(spec), indent=2)}
+        template = env.get_template("generate_library.py.j2")
 
-        print("="*50)
-        print("STARTING LIBRARY GENERATION")
-        print("="*50)
-        print(f"Library: {{spec['name']}}")
-        print(f"Python Version: {python_version}")
-        print("="*50)
-
-        # Create the generation prompt
-        prompt = f"""
-I need you to create a complete Python library called '{{spec['name']}}' based on the following specifications:
-
-**PyPI Description:**
-{{spec['pypi_description']}}
-
-**README Content/Additional Requirements:**
-{{spec['readme_content']}}
-
-**Additional Requirements:**
-{{', '.join(spec['additional_requirements']) if spec['additional_requirements'] else 'None'}}
-
-Please create a complete, production-ready Python library with the following structure:
-1. Proper package structure with __init__.py files
-2. Core implementation modules
-3. setup.py or pyproject.toml for packaging
-4. README.md file
-5. requirements.txt if needed
-6. Basic tests in a tests/ directory
-7. Proper documentation and docstrings
-
-Make sure to:
-- Follow Python best practices and PEP 8
-- Include proper error handling
-- Add type hints where appropriate
-- Create meaningful examples in the README
-- Ensure the code is well-documented
-
-Save everything in the /output directory with the proper package structure.
-Start by creating the directory structure, then implement each module step by step.
-"""
-
-        print("Sending prompt to Open Interpreter...")
-        print("-" * 30)
-
-        # Run the generation
-        response = interpreter.chat(prompt)
-
-        print("-" * 30)
-        print("Generation completed!")
-
-        # Create a generation summary
-        summary = {{
-            "library_name": spec['name'],
-            "generation_timestamp": str(datetime.now()),
-            "python_version": "{python_version}",
-            "status": "completed",
-            "output_directory": "/output"
-        }}
-
-        with open("/output/generation_summary.json", "w") as f:
-            json.dump(summary, f, indent=2)
-
-        print("Summary saved to generation_summary.json")
-
-        # List generated files
-        output_path = Path("/output")
-        if output_path.exists():
-            print("\\nGenerated files:")
-            for file_path in output_path.rglob("*"):
-                if file_path.is_file():
-                    print(f"  {{file_path.relative_to(output_path)}}")
-
-    except Exception as e:
-        error_info = {{
-            "error": str(e),
-            "traceback": traceback.format_exc(),
-            "timestamp": str(datetime.now())
-        }}
-
-        print(f"ERROR: {{e}}")
-        print(f"TRACEBACK:\\n{{traceback.format_exc()}}")
-
-        # Save error info
-        try:
-            with open("/output/error_log.json", "w") as f:
-                json.dump(error_info, f, indent=2)
-        except:
-            pass
-
-        sys.exit(1)
-
-if __name__ == "__main__":
-    main()
-'''
+        def deEmojify(text):
+            regrex_pattern = re.compile(pattern="["
+                                                u"\U0001F600-\U0001F64F"  # emoticons
+                                                u"\U0001F300-\U0001F5FF"  # symbols & pictographs
+                                                u"\U0001F680-\U0001F6FF"  # transport & map symbols
+                                                u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
+                                                "]+", flags=re.UNICODE)
+            return regrex_pattern.sub(r'', text)
+        # Render with values drawn from spec (dict) and explicit python_version
+        spec.readme_content = deEmojify(spec.readme_content)
+        rendered = template.render(
+            spec=asdict(spec),
+            python_version=spec.python_version,
+        )
 
         script_path = work_dir / "generate_library.py"
-        script_path.write_text(script_content)
-        self.logger.info(f"Created generation script at {script_path}")
+        script_path.write_text(rendered, encoding="utf-8")
+        self.logger.info(f"Rendered generation script to {script_path}")
+
+        return script_path
 
     def _build_container(self, work_dir: Path) -> None:
         """Build the Docker container"""
@@ -305,6 +232,7 @@ if __name__ == "__main__":
                     text=True,
                     bufsize=1,
                     universal_newlines=True,
+                    encoding="utf-8",
                 ) as process:
 
                     # Stream output in real-time
@@ -350,7 +278,7 @@ if __name__ == "__main__":
 
             # Try to read error logs
             if log_file.exists():
-                error_info["logs"] = log_file.read_text()
+                error_info["logs"] = log_file.read_text(encoding="utf-8")
 
             raise RuntimeError(f"Container execution failed: {error_info}") from e
 
@@ -428,91 +356,19 @@ if __name__ == "__main__":
 
         for output_dir in self.cache_path.glob("output_*"):
             if output_dir.is_dir():
-                # Extract timestamp from directory name
-                timestamp = int(output_dir.name.split("_")[1])
-                if timestamp < cutoff_time:
-                    shutil.rmtree(output_dir)
-                    removed_count += 1
-                    self.logger.info(f"Removed old cache directory: {output_dir}")
+                try:
+                    # Extract timestamp from directory name
+                    timestamp = int(output_dir.name.split("_")[1])
+                    if timestamp < cutoff_time:
+                        shutil.rmtree(output_dir)
+                        removed_count += 1
+                        self.logger.info(f"Removed old cache directory: {output_dir}")
+                except (ValueError, IndexError):
+                    # Skip directories that don't match the expected naming pattern
+                    pass
 
         return removed_count
 
 
-def main() -> None:
-    """Example usage of the DockerOpenInterpreter"""
-    import argparse
-
-    parser = argparse.ArgumentParser(
-        description="Generate Python libraries using Open Interpreter in Docker"
-    )
-    parser.add_argument("--name", required=True, help="Library name")
-    parser.add_argument("--description", required=True, help="PyPI description")
-    parser.add_argument(
-        "--readme", required=True, help="Path to README file or inline content"
-    )
-    parser.add_argument(
-        "--python-version", default="3.11", help="Python version (default: 3.11)"
-    )
-    parser.add_argument("--cache-folder", default="./cache", help="Cache folder path")
-    parser.add_argument("--openai-api-key", help="OpenAI API key")
-    parser.add_argument(
-        "--model", default="gpt-4", help="Model to use (default: gpt-4)"
-    )
-    parser.add_argument("--timeout", type=int, default=3600, help="Timeout in seconds")
-    parser.add_argument("--list", action="store_true", help="List generated libraries")
-    parser.add_argument("--cleanup", type=int, help="Remove cache older than N days")
-
-    args = parser.parse_args()
-
-    config = GenerationConfig(
-        python_version=args.python_version,
-        cache_folder=args.cache_folder,
-        timeout_seconds=args.timeout,
-        openai_api_key=args.openai_api_key or os.environ.get("OPENAI_API_KEY"),
-        model=args.model,
-    )
-
-    interpreter = DockerOpenInterpreter(config)
-
-    if args.list:
-        libraries = interpreter.list_generated_libraries()
-        if libraries:
-            print("Generated libraries:")
-            for lib in libraries:
-                print(f"  - {lib['library_name']} ({lib['generation_timestamp']})")
-                print(f"    Path: {lib['output_path']}")
-        else:
-            print("No generated libraries found.")
-        return
-
-    if args.cleanup is not None:
-        removed = interpreter.cleanup_cache(args.cleanup)
-        print(f"Removed {removed} old cache directories.")
-        return
-
-    # Read README content
-    readme_content = args.readme
-    if Path(args.readme).exists():
-        readme_content = Path(args.readme).read_text(encoding="utf-8")
-
-    python_version = args.python_version
-    # Create library specification
-    spec = LibrarySpec(
-        name=args.name,
-        pypi_description=args.description,
-        readme_content=readme_content,
-        python_version=python_version,
-    )
-
-    try:
-        result = interpreter.generate_library(spec)
-        print("✅ Library generated successfully!")
-        print(f"📁 Output directory: {result['output_directory']}")
-        print(f"📋 Log file: {result['log_file']}")
-    except Exception as e:
-        print(f"❌ Generation failed: {e}")
-        sys.exit(1)
 
 
-if __name__ == "__main__":
-    main()

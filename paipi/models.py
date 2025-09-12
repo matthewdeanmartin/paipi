@@ -71,8 +71,14 @@ class SearchResult(BaseModel):
 
     name: str
     version: str
-    description: Optional[str] = None
-    summary: Optional[str] = None
+    # Use Field to provide a distinct description for this field in OpenAPI docs
+    summary: Optional[str] = Field(
+        default=None, description="The short, one-line summary of the package."
+    )
+    description: Optional[str] = Field(
+        default=None,
+        description="The long description of the package, typically the README content.",
+    )
     author: Optional[str] = None
     author_email: Optional[str] = None
     maintainer: Optional[str] = None

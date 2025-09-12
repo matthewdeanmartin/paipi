@@ -7,12 +7,17 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
 from starlette.middleware.cors import CORSMiddleware
+
+from paipi import __about__
+from paipi.coder.generate_package import DockerOpenInterpreter, GenerationConfig, LibrarySpec
+from paipi.main_package_glue import _normalize_model, _zip_dir_to_bytes
 
 from .cache_manager import cache_manager
 from .client_readme import OpenRouterClientReadMe
@@ -134,6 +139,7 @@ readme_client = OpenRouterClientReadMe()
 pypi_scraper = PypiScraper()
 
 
+# --- CORE ENDPOINTS ---
 @app.get("/")
 async def root() -> Dict[str, Any]:
     """Root endpoint with basic information."""
@@ -159,7 +165,7 @@ async def health_check() -> Dict[str, Any]:
     return {
         "status": "healthy",
         "service": "paipi",
-        "version": "0.1.0",
+        "version": __about__.__version__,
         "ai_client_available": ai_client is not None,
         "cache_stats": cache_stats,
     }
@@ -246,43 +252,47 @@ async def search_packages(
             None, lambda: ai_client.search_packages(query, size or 20)
         )
 
+        # --- MODIFICATION START: Add a Semaphore to limit concurrency ---
+        semaphore = asyncio.Semaphore(10)
+
         # Helper to augment a single result with real PyPI data
-        async def augment_result(search_result: SearchResult) -> None:
-            real_metadata = await pypi_scraper.get_project_metadata(search_result.name)
-            if real_metadata and "info" in real_metadata:
-                info = real_metadata["info"]
-                search_result.package_exists = True
-                search_result.version = info.get("version", search_result.version)
-                search_result.summary = info.get("summary", search_result.summary)
-                search_result.description = info.get("summary", search_result.summary)
-                # search_result.description = info.get(
-                #     "description", search_result.description
-                # )
-                search_result.author = info.get("author", search_result.author)
-                search_result.author_email = info.get(
-                    "author_email", search_result.author_email
-                )
-                search_result.home_page = info.get("home_page", search_result.home_page)
-                search_result.license = info.get("license", search_result.license)
-                search_result.requires_python = info.get(
-                    "requires_python", search_result.requires_python
-                )
-                search_result.package_url = info.get(
-                    "package_url", search_result.package_url
-                )
-                search_result.project_urls = info.get(
-                    "project_urls", search_result.project_urls
-                )
-                search_result.readme_cached = await loop.run_in_executor(
-                    None, lambda: cache_manager.has_readme_by_name(search_result.name)
-                )
-                search_result.package_cached = await loop.run_in_executor(
-                    None, lambda: cache_manager.has_package_by_name(search_result.name)
-                )
-            else:
-                search_result.package_exists = False
-                search_result.readme_cached = False
-                search_result.package_cached = False
+        async def augment_result(result: SearchResult) -> None:
+            async with semaphore:
+                metadata = await pypi_scraper.get_project_metadata(result.name)
+                if not (metadata and "info" in metadata):
+                    result.package_exists = False
+                    result.readme_cached = False
+                    result.package_cached = False
+                    return
+
+                info = metadata["info"]
+                result.version = info.get("version", "N/A")
+                result.summary = info.get("summary")
+                readme_content = info.get("description")
+                result.description = readme_content
+                result.author = info.get("author")
+                result.home_page = info.get("home_page")
+                result.license = info.get("license")
+                result.requires_python = info.get("requires_python")
+                result.package_url = info.get("package_url")
+                result.project_urls = info.get("project_urls", {})
+
+                if readme_content:
+                    readme_req = ReadmeRequest(
+                        name=result.name,
+                        summary=result.summary,
+                        description=result.description,
+                        install_cmd="",
+                    )
+                    await loop.run_in_executor(
+                        None,
+                        lambda: cache_manager.cache_readme(readme_req, readme_content),
+                    )
+                    result.readme_cached = True
+                else:
+                    result.readme_cached = await loop.run_in_executor(
+                        None, lambda: cache_manager.has_readme_by_name(result.name)
+                    )
 
         # 2. Augment all results concurrently
         if ai_response.results:
@@ -378,20 +388,24 @@ async def generate_package(
     payload: PackageGenerateRequest = Body(...),
 ) -> StreamingResponse:
     """
-    Generate a package ZIP from README + metadata with caching.
+    Generate a package ZIP from README + metadata using the Docker Open Interpreter
+    flow in paipi.generate_package, with simple name-based caching.
 
-    For now, this generates a stub package with basic structure.
-    Future versions will use AI to generate more sophisticated packages.
+    Request model: PackageGenerateRequest (readme_markdown + metadata). :contentReference[oaicite:1]{index=1}
     """
+    # We still guard on ai_client presence if you use it as a feature-flag
     if not ai_client:
         raise HTTPException(
             status_code=503,
             detail="AI service is not available. Please check configuration.",
         )
 
+    if not payload.readme_markdown:
+        raise HTTPException(status_code=400, detail="readme_markdown is required")
+
     package_name = payload.metadata.get("name", "unknown-package")
 
-    # Check cache first
+    # 1) Cache check (same behavior you had)
     try:
         loop = asyncio.get_event_loop()
         cached_zip = await loop.run_in_executor(
@@ -413,15 +427,58 @@ async def generate_package(
     except Exception as e:
         print(f"Error checking package cache: {e}")
 
-    # Generate new package
+    # 2) Not cached → invoke generator
     try:
-        loop = asyncio.get_event_loop()
-        zip_bytes = await loop.run_in_executor(
-            None,
-            lambda: cache_manager.generate_stub_package(package_name, payload.metadata),
+        # Pull options from metadata with safe fallbacks
+        python_version = str(payload.metadata.get("python_version", "3.11"))
+        model_requested = payload.metadata.get("model")
+        normalized_model = _normalize_model(model_requested)
+
+        # pypi_description is optional; fallback to summary/description/name
+        pypi_description = (
+            payload.metadata.get("pypi_description")
+            or payload.metadata.get("summary")
+            or payload.metadata.get("description")
+            or f"Auto-generated library {package_name}"
         )
 
-        # Cache the package
+        # Additional requirements list (optional)
+        additional_requirements = payload.metadata.get("additional_requirements") or []
+
+        # Build the generator config
+        gen_config = GenerationConfig(
+            python_version=python_version,
+            cache_folder=str(Path("pypi_cache") / "generated_libs"),
+            timeout_seconds=int(payload.metadata.get("timeout_seconds", 3600)),
+            openai_api_key=os.environ.get("OPENAI_API_KEY"),
+            model=normalized_model,
+            # you can expose container_name/max_retries via metadata if desired
+        )
+
+        generator = DockerOpenInterpreter(gen_config)
+
+        spec = LibrarySpec(
+            name=package_name,
+            python_version=python_version,
+            pypi_description=pypi_description,
+            readme_content=payload.readme_markdown,
+            additional_requirements=additional_requirements,
+        )
+
+        # Run the container & get an output directory path
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None, lambda: generator.generate_library(spec)
+        )
+
+        output_dir = Path(result["output_directory"])
+
+        # 3) Zip the output directory in-memory
+        zip_bytes = await loop.run_in_executor(
+            None, lambda: _zip_dir_to_bytes(output_dir)
+        )
+
+        # 4) Cache the bytes by package name (same key you were using)
         await loop.run_in_executor(
             None, lambda: cache_manager.cache_package(package_name, zip_bytes)
         )
@@ -434,6 +491,9 @@ async def generate_package(
             },
         )
 
+    except HTTPException:
+        # bubble up explicit HTTP errors
+        raise
     except Exception as e:
         print(f"Package generation error: {e}")
         raise HTTPException(

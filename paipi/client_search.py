@@ -13,7 +13,7 @@ This version implements a new workflow:
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from openai import OpenAI
 
@@ -32,7 +32,7 @@ class OpenRouterClientSearch:
     """
 
     def __init__(
-            self, api_key: Optional[str] = None, base_url: Optional[str] = None
+        self, api_key: Optional[str] = None, base_url: Optional[str] = None
     ) -> None:
         """Initialize the OpenRouter client."""
         self.api_key = api_key or config.openrouter_api_key
@@ -48,7 +48,7 @@ class OpenRouterClientSearch:
         self.base = OpenRouterClientBase(api_key, base_url)
 
     def _generate_package_name_candidates(
-            self, query: str, limit: int, max_iterations: int = 5
+        self, query: str, limit: int, max_iterations: int = 5
     ) -> List[str]:
         """
         Iteratively asks the LLM to generate a list of relevant package names.
@@ -61,7 +61,7 @@ class OpenRouterClientSearch:
         Returns:
             A list of unique, cleaned package name strings.
         """
-        found_packages = set()
+        found_packages: set[str] = set()
         iteration = 0
         messages = [
             {
@@ -93,10 +93,12 @@ class OpenRouterClientSearch:
                 messages.append({"role": "user", "content": prompt})
 
             try:
-                llm_logger.debug(f"Name Generation Iteration {iteration}: Requesting {num_needed} packages.")
+                llm_logger.debug(
+                    f"Name Generation Iteration {iteration}: Requesting {num_needed} packages."
+                )
                 response = self.client.chat.completions.create(
                     model=config.default_model,
-                    messages=messages,
+                    messages=messages,  # type: ignore
                     temperature=0.6,
                     max_tokens=1000,
                 )
@@ -125,7 +127,7 @@ class OpenRouterClientSearch:
         return list(found_packages)[:limit]
 
     def _generate_metadata_for_fake_packages(
-            self, package_names: List[str], query: str, batch_size: int = 3
+        self, package_names: List[str], query: str, batch_size: int = 3
     ) -> Dict[str, SearchResult]:
         """
         Generates full, realistic-looking metadata for a list of non-existent package names.
@@ -143,7 +145,7 @@ class OpenRouterClientSearch:
 
         generated_results = {}
         for i in range(0, len(package_names), batch_size):
-            batch = package_names[i: i + batch_size]
+            batch = package_names[i : i + batch_size]
             llm_logger.info(f"Generating metadata for fake packages batch: {batch}")
 
             prompt = self._build_metadata_prompt(batch, query)
@@ -166,7 +168,9 @@ class OpenRouterClientSearch:
                     max_tokens=4000,
                 )
                 content = response.choices[0].message.content
-                llm_logger.debug(f"RAW LLM Metadata Response for {batch}:\n---\n{content}\n---")
+                llm_logger.debug(
+                    f"RAW LLM Metadata Response for {batch}:\n---\n{content}\n---"
+                )
                 if not content:
                     continue
 
@@ -178,10 +182,14 @@ class OpenRouterClientSearch:
                         result.package_exists = False
                         generated_results[result.name] = result
                     except Exception as e:
-                        llm_logger.warning(f"Error parsing generated metadata item: {e}\nItem: {item}")
+                        llm_logger.warning(
+                            f"Error parsing generated metadata item: {e}\nItem: {item}"
+                        )
 
             except Exception as e:
-                llm_logger.error(f"Error querying OpenRouter for metadata generation: {e}")
+                llm_logger.error(
+                    f"Error querying OpenRouter for metadata generation: {e}"
+                )
                 continue
 
         return generated_results
@@ -212,10 +220,14 @@ class OpenRouterClientSearch:
             else:
                 fake_package_names.append(name)
 
-        llm_logger.info(f"Verified Packages - Real: {len(real_package_names)}, Fake: {len(fake_package_names)}")
+        llm_logger.info(
+            f"Verified Packages - Real: {len(real_package_names)}, Fake: {len(fake_package_names)}"
+        )
 
         # Step 3: Generate metadata for the fake packages in batches
-        fake_package_metadata = self._generate_metadata_for_fake_packages(fake_package_names, query)
+        fake_package_metadata = self._generate_metadata_for_fake_packages(
+            fake_package_names, query
+        )
 
         # Step 4: Combine results, preserving original order
         final_results = []
