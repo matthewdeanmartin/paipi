@@ -1,0 +1,29 @@
+{
+  "openrouter_api_key": "sk-or-v1-your-api-key-here",
+  "models_to_test": [
+    "openai/gpt-4o",
+    "openai/gpt-4o-mini",
+    "anthropic/claude-3.5-sonnet",
+    "anthropic/claude-3-haiku",
+    "google/gemini-pro",
+    "meta-llama/llama-3.1-70b-instruct",
+    "microsoft/wizardlm-2-8x22b",
+    "qwen/qwen-2.5-72b-instruct"
+  ],
+  "evaluation_settings": {
+    "test_package_count": 25,
+    "max_concurrent_requests": 5,
+    "request_timeout": 30,
+    "topics_to_test": ["web", "data", "ml", "testing", "gui"]
+  },
+  "cache_settings": {
+    "pypi_cache_ttl_days": 1,
+    "response_cache_ttl_days": 7,
+    "enable_aggressive_caching": true
+  },
+  "output_settings": {
+    "create_detailed_plots": true,
+    "save_raw_responses": true,
+    "export_formats": ["csv", "json", "html"]
+  }
+}

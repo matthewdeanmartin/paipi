@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "PyPI search, except the backend is an LLM's pixelated memory of PyPI"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.9"
+requires-python = ">=3.14"
 authors = [
     { name = "Matthew Martin", email = "matthewdeanmartin@gmail.com" },
 ]
@@ -24,6 +24,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
+    "pydantic>=2.12.0; python_version >= '3.14'",
     "fastapi>=0.104.0",
     "uvicorn[standard]>=0.24.0",
     "openai>=1.0.0",

@@ -2,7 +2,7 @@
 <project version="4">
   <component name="DataSourceManagerImpl" format="xml" multifile-model="true">
     <data-source source="LOCAL" name="cache" uuid="e0a82a79-733d-4f6f-8346-dd8853917153">
-      <driver-ref>sqlite.xerial</driver-ref>
+      <driver-ref>da351c92-dd31-41a3-9b96-12e862260e94</driver-ref>
       <synchronize>true</synchronize>
       <jdbc-driver>org.sqlite.JDBC</jdbc-driver>
       <jdbc-url>jdbc:sqlite:$PROJECT_DIR$/pypi_cache/cache.db</jdbc-url>
