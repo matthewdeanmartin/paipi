@@ -30,7 +30,7 @@ def load_config(config_path: Optional[str] = None) -> Config:
     config = Config()
 
     if config_path and Path(config_path).exists():
-        with open(config_path, 'r') as f:
+        with open(config_path) as f:
             config_data = json.load(f)
 
         # Update config with loaded values
