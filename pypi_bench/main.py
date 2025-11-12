@@ -17,14 +17,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple, Union
-from urllib.parse import urljoin
 
 import aiohttp
 import matplotlib.pyplot as plt
 import pandas as pd
-import requests
 import seaborn as sns
-from tqdm.asyncio import tqdm
 
 
 # Configuration
@@ -143,7 +140,7 @@ class ResponseCache:
             return {}
 
         try:
-            with open(self.cache_file, 'r') as f:
+            with open(self.cache_file) as f:
                 return json.load(f)
         except (json.JSONDecodeError, FileNotFoundError):
             return {}
@@ -749,7 +746,7 @@ async def main() -> None:
     # Generate test cases
     logger.info("Generating test cases...")
     mixed_test_cases = test_generator.generate_mixed_test(config.test_package_count)
-    topic_packages = test_generator.generate_topic_packages("web", config.test_package_count)
+    test_generator.generate_topic_packages("web", config.test_package_count)
     fake_packages = test_generator.generate_fake_test(config.test_package_count)
 
     # Run evaluations
