@@ -1,4 +1,58 @@
-/* You can add global styles to this file, and also import other style files */
+/* Tailwind base */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Light "PyPI-ish" base styling */
+@layer base {
+  body {
+    @apply bg-slate-100 text-slate-900 antialiased;
+  }
+}
+
+/* Small helpers for consistent cards / containers */
+@layer components {
+  .pypi-shell {
+    @apply min-h-screen flex flex-col;
+  }
+
+  .pypi-container {
+    @apply container mx-auto px-4 sm:px-6 lg:px-8;
+  }
+
+  .pypi-card {
+    @apply bg-white border border-slate-200 rounded-lg shadow-sm;
+  }
+
+  .pypi-card-hover {
+    @apply transition-shadow hover:shadow-md hover:border-sky-500;
+  }
+
+  .pypi-badge {
+    @apply text-xs font-mono bg-slate-100 text-slate-700 border border-slate-300 px-2 py-1 rounded-md;
+  }
+
+  .pypi-section-title {
+    @apply text-lg font-semibold text-slate-800 mb-3;
+  }
+
+  .pypi-link {
+    @apply text-sky-700 hover:text-sky-900 hover:underline;
+  }
+
+  .pypi-primary-btn {
+    @apply bg-sky-700 hover:bg-sky-800 text-white font-semibold py-2 px-4 rounded-lg transition-colors;
+  }
+
+  .pypi-secondary-btn {
+    @apply bg-slate-200 hover:bg-slate-300 text-slate-800 font-semibold py-2 px-4 rounded-lg transition-colors;
+  }
+
+  .pypi-danger {
+    @apply text-rose-700;
+  }
+
+  .pypi-success {
+    @apply text-sky-800;
+  }
+}

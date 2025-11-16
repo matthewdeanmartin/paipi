@@ -1,25 +1,61 @@
 <!-- Main Application Container -->
-<div class="bg-gray-900 text-gray-200 min-h-screen font-sans antialiased">
-  <main class="container mx-auto p-4 sm:p-6 lg:p-8">
+<div class="pypi-shell font-sans">
+  <!-- Hero / Header -->
+  <header class="bg-sky-700 text-white shadow">
+    <div class="pypi-container py-6 md:py-8">
+      <div class="flex items-center justify-between gap-4 mb-4 md:mb-6">
+        <div class="flex items-center gap-3">
+          <!-- Simple PyPI-like cube logo -->
+          <div class="flex items-center justify-center w-10 h-10 rounded bg-sky-500">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" class="w-7 h-7 text-yellow-300">
+              <path fill="currentColor"
+                    d="M139.23 219.88a12.12 12.12 0 0 1-13-5.22l-37-64.14a12 12 0 0 1 10.4-18.4l64.09 37a12 12 0 0 1-5.21 23l-3.21.54l-11.89-20.6l10.4-6a12 12 0 0 1 15.21-1.22a12.06 12.06 0 0 1 4 14.61l-24.46 42.37a12 12 0 0 1-5.13 7.06Zm-16.11-99.76l-37-64.14a12 12 0 0 1 10.4-18.4l64.09 37a12 12 0 0 1-5.21 23l-3.21.54l-11.89-20.6l10.4-6a12 12 0 1 1 10.4 20.8l-37 21.36a12 12 0 0 1-15-2.56Z M232 128a104 104 0 1 1-104-104a104.11 104.11 0 0 1 104 104Zm-16 0a88 88 0 1 0-88 88a88.1 88.1 0 0 0 88-88Z"/>
+            </svg>
+          </div>
+          <div>
+            <h1 class="text-3xl md:text-4xl font-bold tracking-tight">
+              PAIPI
+            </h1>
+            <p class="text-sm md:text-base text-sky-100">
+              Find, inspect and scaffold Python packages with AI
+            </p>
+          </div>
+        </div>
 
-    <!-- Header Section -->
-    <header class="text-center mb-8">
-      <div class="flex items-center justify-center gap-3 mb-2">
-        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 256 256"
-             class="text-yellow-400">
-          <path fill="currentColor"
-                d="M139.23 219.88a12.12 12.12 0 0 1-13-5.22l-37-64.14a12 12 0 0 1 10.4-18.4l64.09 37a12 12 0 0 1-5.21 23l-3.21.54l-11.89-20.6l10.4-6a12 12 0 0 1 15.21-1.22a12.06 12.06 0 0 1 4 14.61l-24.46 42.37a12 12 0 0 1-5.13 7.06Zm-16.11-99.76l-37-64.14a12 12 0 0 1 10.4-18.4l64.09 37a12 12 0 0 1-5.21 23l-3.21.54l-11.89-20.6l10.4-6a12 12 0 1 1 10.4 20.8l-37 21.36a12 12 0 0 1-15-2.56Z M232 128a104 104 0 1 1-104-104a104.11 104.11 0 0 1 104 104Zm-16 0a88 88 0 1 0-88 88a88.1 88.1 0 0 0 88-88Z"/>
-        </svg>
-        <h1
-          class="text-4xl md:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 to-blue-400">
-          PAIPI
-        </h1>
+        <!-- Small “status” chip like PyPI counters -->
+        <div class="hidden sm:flex flex-col items-end text-xs text-sky-100/80">
+          <span>Backed by PAIPI API</span>
+          <span class="opacity-80">Local host: 127.0.0.1:8080</span>
+        </div>
       </div>
-      <p class="text-md text-gray-400">AI-Powered PyPI Search</p>
-    </header>
 
-    <!-- VIEW CONTAINER -->
-    <div class="max-w-4xl mx-auto">
+      <!-- Search bar sits in the hero, like PyPI -->
+      @if (!selectedPackage()) {
+        <form (submit)="onSearch($event)" class="w-full">
+          <div
+            class="relative max-w-3xl mx-auto">
+            <input
+              [(ngModel)]="query"
+              name="search-query"
+              type="search"
+              class="w-full pl-11 pr-4 py-3 md:py-3.5 rounded-md bg-white text-slate-900 border border-slate-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-400 focus:border-sky-400 placeholder:text-slate-400"
+              placeholder="Type '/' or search for packages, e.g. &quot;http clients&quot;, &quot;terminal text editors&quot;…" />
+            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+              </svg>
+            </div>
+          </div>
+        </form>
+      }
+    </div>
+  </header>
+
+  <!-- MAIN CONTENT -->
+  <main class="flex-1 py-6 md:py-8">
+    <div class="pypi-container max-w-5xl">
       @if (selectedPackage()) {
         <!-- DETAIL VIEW -->
         <app-package-detail
@@ -28,68 +64,82 @@
           (readmeGenerated)="handleReadmeGenerated($event)"
         />
       } @else {
-        <!-- SEARCH VIEW -->
-        <form (submit)="onSearch($event)" class="w-full mb-10">
-          <div class="relative">
-            <input [(ngModel)]="query" name="search-query" type="search"
-                   class="w-full pl-12 pr-4 py-3 bg-gray-800 border-2 border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
-                   placeholder="e.g., terminal text editors, http clients...">
-            <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
-                   stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-                   class="text-gray-500">
-                <circle cx="11" cy="11" r="8"></circle>
-                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-              </svg>
-            </div>
-          </div>
-        </form>
+        <!-- Search / Results region -->
 
         @if (isLoading()) {
-          <div class="flex flex-col items-center justify-center text-gray-500 mt-12">
-            <svg class="animate-spin h-8 w-8 text-blue-400 mb-3" xmlns="http://www.w3.org/2000/svg" fill="none"
+          <div class="flex flex-col items-center justify-center text-slate-500 mt-10">
+            <svg class="animate-spin h-7 w-7 text-sky-600 mb-3" xmlns="http://www.w3.org/2000/svg" fill="none"
                  viewBox="0 0 24 24">
               <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
               <path class="opacity-75" fill="currentColor"
                     d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
-            <p>Searching for '{{ lastQuery() }}'...</p></div>
+            <p>Searching for “{{ lastQuery() }}”&hellip;</p>
+          </div>
         }
+
         @if (error()) {
-          <div class="bg-red-900/50 border border-red-700 text-red-300 px-4 py-3 rounded-lg text-center mt-12"
-               role="alert"><strong class="font-bold">An error occurred:</strong><span
-            class="block sm:inline ml-2">{{ error() }}</span></div>
+          <div class="pypi-card border-rose-200 bg-rose-50 text-rose-800 px-4 py-3 text-sm mt-8" role="alert">
+            <strong class="font-semibold">An error occurred:</strong>
+            <span class="ml-2">{{ error() }}</span>
+          </div>
         }
+
         @if (!isLoading() && !error() && searchPerformed()) {
           @if (searchResults().length > 0) {
-            <div class="flex flex-col gap-4">
-              <p class="text-gray-400 mb-2">Showing {{ searchResults().length }} results for "{{ lastQuery() }}"</p>
+            <div class="flex flex-col gap-4 mt-6">
+              <p class="text-sm text-slate-600">
+                Showing {{ searchResults().length }} result{{ searchResults().length === 1 ? '' : 's' }}
+                for “{{ lastQuery() }}”.
+              </p>
+
               @for (pkg of searchResults(); track pkg.name) {
-                <div (click)="handleSelectPackage(pkg)"
-                     class="bg-gray-800 border border-gray-700 rounded-lg p-5 transition-all hover:border-blue-500 hover:shadow-lg cursor-pointer">
+                <div
+                  (click)="handleSelectPackage(pkg)"
+                  class="pypi-card pypi-card-hover p-5 cursor-pointer">
                   <div class="flex flex-col sm:flex-row justify-between items-baseline gap-2">
-                        <span class="text-xl font-bold" [class.text-red-500]="!pkg.package_exists"
-                              [class.text-blue-400]="pkg.package_exists">
+                        <span class="text-lg md:text-xl font-semibold"
+                              [class.pypi-danger]="!pkg.package_exists"
+                              [class.pypi-success]="pkg.package_exists">
                           {{ pkg.name }}
                         </span>
-                    <span
-                      class="text-xs font-mono bg-gray-700 text-yellow-300 px-2 py-1 rounded-md">{{ pkg.version }}</span>
+                    <span class="pypi-badge flex-shrink-0">
+                      {{ pkg.version }}
+                    </span>
                   </div>
-                  <p class="mt-2 text-gray-300">{{ pkg.summary }}</p>
+                  <p class="mt-1.5 text-sm text-slate-700">
+                    {{ pkg.summary }}
+                  </p>
+                  <p class="mt-1 text-xs text-slate-500">
+                    @if (pkg.package_exists) {
+                      Exists on PyPI
+                    } @else {
+                      Suggested name (not on PyPI)
+                    }
+                  </p>
                 </div>
               }
             </div>
           } @else {
             <!-- No Results State -->
-            <div class="text-center text-gray-500 mt-12">
-              <p class="text-xl mb-2">No results found for "{{ lastQuery() }}".</p>
-              <p>Please try a different search query.</p>
+            <div class="pypi-card text-center text-slate-600 mt-10 px-6 py-8">
+              <p class="text-lg font-medium mb-1">
+                No results found for “{{ lastQuery() }}”.
+              </p>
+              <p class="text-sm">
+                Try another search term, or be more general.
+              </p>
             </div>
           }
         } @else if (!isLoading() && !searchPerformed()) {
           <!-- Initial Welcome State -->
-          <div class="text-center text-gray-500 mt-12">
-            <p>Search for Python packages using AI's knowledge.</p>
+          <div class="pypi-card mt-10 px-6 py-8 text-center text-slate-600">
+            <p class="text-lg font-medium mb-2">
+              Search PyPI using AI’s knowledge.
+            </p>
+            <p class="text-sm">
+              Describe what you need&mdash;for example, “async http clients” or “terminal markdown viewer”&mdash;and PAIPI will suggest matching packages.
+            </p>
           </div>
         }
       }

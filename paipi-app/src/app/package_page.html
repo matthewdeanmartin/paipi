@@ -1,135 +1,146 @@
-<div class="bg-gray-800 border border-gray-700 rounded-lg p-6 animate-fade-in">
-      <!-- Back Button -->
-      <button (click)="close.emit()"
-              class="mb-6 bg-gray-700 hover:bg-gray-600 text-gray-200 px-4 py-2 rounded-lg transition-colors flex items-center gap-2">
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
-             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="19" y1="12" x2="5" y2="12"></line>
-          <polyline points="12 19 5 12 12 5"></polyline>
+<div class="pypi-card p-6 md:p-7 animate-fade-in">
+  <!-- Back Button -->
+  <button
+    (click)="close.emit()"
+    class="mb-5 inline-flex items-center gap-2 text-sm pypi-secondary-btn">
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+         stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="19" y1="12" x2="5" y2="12"></line>
+      <polyline points="12 19 5 12 12 5"></polyline>
+    </svg>
+    Back to search
+  </button>
+
+  <!-- Header -->
+  <div class="flex flex-col sm:flex-row justify-between items-start gap-4 mb-4">
+    <div>
+      <h2 class="text-2xl md:text-3xl font-semibold"
+          [class.pypi-danger]="!package.package_exists"
+          [class.pypi-success]="package.package_exists">
+        {{ package.name }}
+        @if (!package.package_exists) {
+          <span class="text-sm align-middle text-slate-600">(not found on PyPI)</span>
+        }
+      </h2>
+      <p class="text-sm md:text-base text-slate-600 mt-1">{{ package.summary }}</p>
+    </div>
+    <span class="pypi-badge flex-shrink-0">{{ package.version }}</span>
+  </div>
+
+  <!-- Metadata Grid -->
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-6 border-t border-slate-200 pt-5">
+    <div>
+      <h3 class="pypi-section-title">Details</h3>
+      <dl class="space-y-2 text-sm">
+        @if (package.author) {
+          <div class="grid grid-cols-3 gap-1">
+            <dt class="text-slate-500">Author</dt>
+            <dd class="col-span-2 text-slate-800">{{ package.author }}</dd>
+          </div>
+        }
+        @if (package.license) {
+          <div class="grid grid-cols-3 gap-1">
+            <dt class="text-slate-500">License</dt>
+            <dd class="col-span-2 text-slate-800">{{ package.license }}</dd>
+          </div>
+        }
+        @if (package.requires_python) {
+          <div class="grid grid-cols-3 gap-1">
+            <dt class="text-slate-500">Requires</dt>
+            <dd class="col-span-2 text-slate-800">Python {{ package.requires_python }}</dd>
+          </div>
+        }
+      </dl>
+    </div>
+    <div>
+      <h3 class="pypi-section-title">Links</h3>
+      <div class="flex flex-col space-y-2 text-sm">
+        @if (package.home_page) {
+          <a [href]="package.home_page" target="_blank" rel="noopener noreferrer" class="pypi-link">
+            Homepage
+          </a>
+        }
+        @if (package.package_url) {
+          <a [href]="package.package_url" target="_blank" rel="noopener noreferrer" class="pypi-link">
+            PyPI package page
+          </a>
+        }
+        @if (package.project_urls?.['Documentation']) {
+          <a [href]="package.project_urls?.['Documentation']" target="_blank" rel="noopener noreferrer"
+             class="pypi-link">
+            Documentation
+          </a>
+        }
+      </div>
+    </div>
+  </div>
+
+  <!-- Keywords -->
+  @if (splitKeywords(package.keywords).length > 0) {
+    <div class="mt-6 pt-5 border-t border-slate-200">
+      <h3 class="pypi-section-title">Keywords</h3>
+      <div class="flex flex-wrap gap-2">
+        @for (keyword of splitKeywords(package.keywords); track $index) {
+          <span class="text-xs bg-sky-50 text-sky-800 px-2 py-1 rounded-full border border-sky-200">
+            {{ keyword }}
+          </span>
+        }
+      </div>
+    </div>
+  }
+
+  <!-- README Generation -->
+  <div class="mt-6 pt-5 border-t border-slate-200">
+    <h3 class="pypi-section-title">README.md</h3>
+
+    @if (readmeIsLoading()) {
+      <div class="flex items-center gap-3 text-slate-600 p-4 bg-slate-50 rounded-md border border-slate-200">
+        <svg class="animate-spin h-5 w-5 text-sky-600" xmlns="http://www.w3.org/2000/svg" fill="none"
+             viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
         </svg>
-        Back to Search
-      </button>
-
-      <!-- Header -->
-      <div class="flex flex-col sm:flex-row justify-between items-start gap-4 mb-4">
-        <div>
-          <h2 class="text-3xl font-bold" [class.text-red-500]="!package.package_exists"
-              [class.text-blue-400]="package.package_exists">
-            {{ package.name }}
-            @if (!package.package_exists) {
-              <span class="text-sm align-middle">(Package not found on PyPI)</span>
-            }
-          </h2>
-          <p class="text-gray-400 mt-1">{{ package.summary }}</p>
-        </div>
-        <span
-          class="text-sm font-mono bg-gray-700 text-yellow-300 px-3 py-1 rounded-md flex-shrink-0">{{ package.version }}</span>
+        <span>Generating README with AI&hellip;</span>
       </div>
-
-<!--      <p class="text-gray-300 mb-6">{{ package.description }}</p>-->
-
-      <!-- Metadata Grid -->
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-6 border-t border-gray-700 pt-6">
-        <div>
-          <h3 class="text-lg font-semibold text-gray-200 mb-3">Details</h3>
-          <dl class="space-y-2 text-sm">
-            @if (package.author) {
-              <div class="grid grid-cols-3 gap-1">
-                <dt class="text-gray-500">Author</dt>
-                <dd class="col-span-2 text-gray-300">{{ package.author }}</dd>
-              </div>
-            }
-            @if (package.license) {
-              <div class="grid grid-cols-3 gap-1">
-                <dt class="text-gray-500">License</dt>
-                <dd class="col-span-2 text-gray-300">{{ package.license }}</dd>
-              </div>
-            }
-            @if (package.requires_python) {
-              <div class="grid grid-cols-3 gap-1">
-                <dt class="text-gray-500">Requires</dt>
-                <dd class="col-span-2 text-gray-300">Python {{ package.requires_python }}</dd>
-              </div>
-            }
-          </dl>
-        </div>
-        <div>
-          <h3 class="text-lg font-semibold text-gray-200 mb-3">Links</h3>
-          <div class="flex flex-col space-y-2 text-sm">
-            @if (package.home_page) {
-              <a [href]="package.home_page" target="_blank" rel="noopener noreferrer"
-                 class="text-blue-400 hover:underline">Homepage</a>
-            }
-            @if (package.package_url) {
-              <a [href]="package.package_url" target="_blank" rel="noopener noreferrer"
-                 class="text-blue-400 hover:underline">PyPI Package URL</a>
-            }
-            @if (package.project_urls?.['Documentation']) {
-              <a [href]="package.project_urls?.['Documentation']" target="_blank" rel="noopener noreferrer"
-                 class="text-blue-400 hover:underline">Documentation</a>
-            }
-          </div>
-        </div>
+    } @else if (safeReadmeHtml()) {
+      <div class="prose prose-sm max-w-none bg-slate-50 border border-slate-200 rounded-md p-4">
+        <div [innerHTML]="safeReadmeHtml()"></div>
       </div>
-
-      <!-- Keywords -->
-      @if (splitKeywords(package.keywords).length > 0) {
-        <div class="mt-6 pt-6 border-t border-gray-700">
-          <h3 class="text-lg font-semibold text-gray-200 mb-3">Keywords</h3>
-          <div class="flex flex-wrap gap-2">
-            @for (keyword of splitKeywords(package.keywords); track $index) {
-              <span class="text-xs bg-blue-900/50 text-blue-300 px-2 py-1 rounded-full">{{ keyword }}</span>
-            }
-          </div>
-        </div>
-      }
-
-      <!-- README Generation -->
-      <div class="mt-6 pt-6 border-t border-gray-700">
-        <h3 class="text-lg font-semibold text-gray-200 mb-3">README.md</h3>
-
-        @if (readmeIsLoading()) {
-          <div class="flex items-center gap-3 text-gray-400 p-4 bg-gray-800 rounded-md">
-            <svg class="animate-spin h-5 w-5 text-blue-400" xmlns="http://www.w3.org/2000/svg" fill="none"
+      <div class="mt-5 flex flex-wrap gap-3">
+        <button
+          (click)="onDownloadPackage()"
+          [disabled]="packageIsLoading()"
+          class="pypi-primary-btn w-44 justify-center inline-flex items-center disabled:opacity-50 disabled:cursor-not-allowed">
+          @if (packageIsLoading()) {
+            <svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none"
                  viewBox="0 0 24 24">
               <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
               <path class="opacity-75" fill="currentColor"
                     d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
-            <span>Generating README with AI...</span>
-          </div>
-        } @else if (safeReadmeHtml()) {
-          <div class="prose prose-sm prose-invert bg-gray-900/50 p-4 rounded-md border border-gray-600 max-w-none">
-            <div [innerHTML]="safeReadmeHtml()"></div>
-          </div>
-          <div class="mt-6 flex gap-4">
-            <button (click)="onDownloadPackage()" [disabled]="packageIsLoading()"
-                    class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded-lg transition-colors flex items-center justify-center w-48 disabled:opacity-50 disabled:cursor-not-allowed">
-              @if (packageIsLoading()) {
-                <svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                  <path class="opacity-75" fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-              } @else {
-                <span>Download Package</span>
-              }
-            </button>
-            <button (click)="resetReadme()"
-                    class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg transition-colors">
-              Regenerate
-            </button>
-          </div>
-        } @else {
-          <p class="text-gray-400 text-sm mb-4">Click the button below to generate a README.md file for this
-            package.</p>
-          <button (click)="onGenerateReadme()"
-                  class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded-lg transition-colors">
-            Generate README.md
-          </button>
-          @if (readmeError()) {
-            <p class="text-red-400 mt-2">{{ readmeError() }}</p>
+          } @else {
+            <span>Download package</span>
           }
-        }
+        </button>
+        <button
+          (click)="resetReadme()"
+          class="pypi-secondary-btn">
+          Regenerate
+        </button>
       </div>
-    </div>
+    } @else {
+      <p class="text-slate-600 text-sm mb-4">
+        Generate a README.md for this package using its metadata and PAIPI’s AI backend.
+      </p>
+      <button
+        (click)="onGenerateReadme()"
+        class="pypi-primary-btn">
+        Generate README.md
+      </button>
+      @if (readmeError()) {
+        <p class="text-sm text-rose-700 mt-2">{{ readmeError() }}</p>
+      }
+    }
+  </div>
+</div>
