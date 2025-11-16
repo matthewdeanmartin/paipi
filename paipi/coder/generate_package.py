@@ -7,11 +7,9 @@ to generate Python libraries based on PyPI descriptions and README specification
 
 from __future__ import annotations
 
-import re
-
-from jinja2 import Environment, FileSystemLoader, ChoiceLoader, StrictUndefined
 import json
 import logging
+import re
 import shutil
 import subprocess
 import tempfile
@@ -19,6 +17,8 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from jinja2 import ChoiceLoader, Environment, FileSystemLoader, StrictUndefined
 
 # Configure logging
 logging.basicConfig(
@@ -119,10 +119,6 @@ CMD ["python", "-c", "import interpreter; print('Open Interpreter ready')"]
         dockerfile_path.write_text(dockerfile_content.strip())
         self.logger.info(f"Created Dockerfile at {dockerfile_path}")
 
-    from dataclasses import asdict
-    from pathlib import Path
-    from jinja2 import Environment, FileSystemLoader, ChoiceLoader, StrictUndefined
-
     def _create_generation_script(self, work_dir: Path, spec: LibrarySpec) -> Path:
         """
         Render generate_library.py from the Jinja2 template generate_library.py.j2
@@ -152,14 +148,18 @@ CMD ["python", "-c", "import interpreter; print('Open Interpreter ready')"]
 
         template = env.get_template("generate_library.py.j2")
 
-        def deEmojify(text):
-            regrex_pattern = re.compile(pattern="["
-                                                "\U0001F600-\U0001F64F"  # emoticons
-                                                "\U0001F300-\U0001F5FF"  # symbols & pictographs
-                                                "\U0001F680-\U0001F6FF"  # transport & map symbols
-                                                "\U0001F1E0-\U0001F1FF"  # flags (iOS)
-                                                "]+", flags=re.UNICODE)
-            return regrex_pattern.sub(r'', text)
+        def deEmojify(text: str) -> str:
+            regrex_pattern = re.compile(
+                pattern="["
+                "\U0001f600-\U0001f64f"  # emoticons
+                "\U0001f300-\U0001f5ff"  # symbols & pictographs
+                "\U0001f680-\U0001f6ff"  # transport & map symbols
+                "\U0001f1e0-\U0001f1ff"  # flags (iOS)
+                "]+",
+                flags=re.UNICODE,
+            )
+            return regrex_pattern.sub(r"", text)
+
         # Render with values drawn from spec (dict) and explicit python_version
         spec.readme_content = deEmojify(spec.readme_content)
         rendered = template.render(
@@ -341,7 +341,6 @@ CMD ["python", "-c", "import interpreter; print('Open Interpreter ready')"]
             if output_dir.is_dir():
                 summary_file = output_dir / "generation_summary.json"
                 if summary_file.exists():
-
                     with open(summary_file, encoding="utf-8") as f:
                         summary = json.load(f)
                         summary["output_path"] = str(output_dir)
@@ -368,7 +367,3 @@ CMD ["python", "-c", "import interpreter; print('Open Interpreter ready')"]
                     pass
 
         return removed_count
-
-
-
-

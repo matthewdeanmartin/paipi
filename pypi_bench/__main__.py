@@ -18,10 +18,10 @@ from typing import List, Optional
 # Import from the main evaluation module
 from pypi_bench.main import (
     Config,
+    EvaluationEngine,
     PackageIndexManager,
     PackageTestGenerator,
-    EvaluationEngine,
-    ResultsAnalyzer
+    ResultsAnalyzer,
 )
 
 

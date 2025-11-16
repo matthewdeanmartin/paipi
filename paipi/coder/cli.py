@@ -1,11 +1,15 @@
 from __future__ import annotations
-import argparse
 
+import argparse
 import os
 import sys
 from pathlib import Path
 
-from paipi.coder.generate_package import GenerationConfig, DockerOpenInterpreter, LibrarySpec
+from paipi.coder.generate_package import (
+    DockerOpenInterpreter,
+    GenerationConfig,
+    LibrarySpec,
+)
 
 
 def main() -> None:

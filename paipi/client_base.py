@@ -13,7 +13,7 @@ import untruncate_json
 from openai import OpenAI
 
 from .config import config
-from .logger import llm_logger  # <--- IMPORT THE NEW LOGGER
+from .logger import llm_logger
 
 
 class OpenRouterClientBase:

@@ -16,7 +16,11 @@ from pydantic import BaseModel
 from starlette.middleware.cors import CORSMiddleware
 
 from paipi import __about__
-from paipi.coder.generate_package import DockerOpenInterpreter, GenerationConfig, LibrarySpec
+from paipi.coder.generate_package import (
+    DockerOpenInterpreter,
+    GenerationConfig,
+    LibrarySpec,
+)
 from paipi.main_package_glue import _normalize_model, _zip_dir_to_bytes
 
 from .cache_manager import cache_manager
