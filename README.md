@@ -151,4 +151,5 @@ make check
 
 ## License
 
-MIT
+MIT.
+
