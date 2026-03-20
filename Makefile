@@ -136,27 +136,33 @@ audit:
 # ---------------------------
 # Angular app helpers (paipi-app)
 # ---------------------------
-.PHONY: app-install app-start app-build app-lint app
+.PHONY: app-install app-start app-build app-lint app api ui
 
 app-install:
 	@echo "Installing npm deps in $(APP_DIR)"
-	$(NPM) ci --prefix $(APP_DIR)
+	cd $(APP_DIR) && $(NPM) install
 
 app-start:
 	@echo "Starting Angular dev server"
-	$(NPM) start --prefix $(APP_DIR)
+	cd $(APP_DIR) && $(NPM) start
 	# Alternatively: $(NG) serve --prefix $(APP_DIR)
 
 app-build:
 	@echo "Building Angular app"
-	$(NPM) run build --prefix $(APP_DIR)
+	cd $(APP_DIR) && $(NPM) run build
 
 app-lint:
 	@echo "Linting Angular app"
-	$(NPM) run lint --prefix $(APP_DIR) || true
+	cd $(APP_DIR) && $(NPM) run lint || true
 
 # Simple launcher alias
 app: app-install app-start
+
+api: uv.lock
+	@echo "Starting PAIPI API"
+	$(VENV) python -m paipi
+
+ui: app-install app-start
 
 # ---------------------------
 # Convenience top-level goals

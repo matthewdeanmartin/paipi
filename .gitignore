@@ -209,3 +209,4 @@ pypi_cache
 paipi_cache.db
 /examples/test_run/
 /logs/
+.idea

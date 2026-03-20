@@ -4,14 +4,11 @@ PyPI Scraper client for fetching package metadata from the official JSON API.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any, Dict, List, Optional, cast
 
-import pypi_json
-from packaging.requirements import InvalidRequirement
+import httpx
 from pydantic import ValidationError
-from requests import HTTPError
 
 from .models import (
     PackageFile,
@@ -33,9 +30,16 @@ class PypiScraper:
 
     def __init__(self) -> None:
         """Initialize the scraper client."""
-        # The pypi_json library is synchronous and class-based.
-        # We create one instance to reuse its internal requests.Session.
-        self.client = pypi_json.PyPIJSON()
+        self.base_url = "https://pypi.org/pypi"
+        self.timeout = 30.0
+
+    def _build_metadata_url(
+        self, package_name: str, version: Optional[str] = None
+    ) -> str:
+        """Build the PyPI JSON API URL for a package/version request."""
+        if version is None:
+            return f"{self.base_url}/{package_name}/json"
+        return f"{self.base_url}/{package_name}/{version}/json"
 
     async def get_project_metadata(
         self, package_name: str, version: Optional[str] = None
@@ -50,33 +54,35 @@ class PypiScraper:
         Returns:
             A dictionary with the raw package metadata, or None if not found.
         """
-        loop = asyncio.get_event_loop()
+        url = self._build_metadata_url(package_name, version)
         try:
             scraper_logger.info(
                 f"Fetching metadata for '{package_name}'"
                 f"{' version ' + version if version else ' (latest)'}..."
             )
-            # The pypi_json library is synchronous, so we run it in an executor
-            # to avoid blocking the asyncio event loop.
-            metadata_obj = await loop.run_in_executor(
-                None, lambda: self.client.get_metadata(package_name, version)
-            )
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(url)
+                if response.status_code == 404:
+                    scraper_logger.warning(
+                        f"Package '{package_name}'"
+                        f"{' version ' + version if version else ''} not found on PyPI."
+                    )
+                    return None
+                response.raise_for_status()
+                return cast(Dict[str, Any], response.json())
 
-            # The returned object is a NamedTuple; convert it to a dict
-            # to match the expected return type used in main.py.
-            return metadata_obj._asdict()
-
-        except InvalidRequirement:
-            # This exception is raised by pypi_json for 404s.
-            scraper_logger.warning(
-                f"Package '{package_name}'"
-                f"{' version ' + version if version else ''} not found on PyPI."
-            )
-            return None
-        except HTTPError as e:
-            # pypi_json uses requests, which raises HTTPError.
+        except httpx.HTTPStatusError as e:
             scraper_logger.error(
                 f"HTTP error fetching '{package_name}': {e.response.status_code} - {e}"
+            )
+            return None
+        except httpx.RequestError as e:
+            scraper_logger.error(f"Network error fetching '{package_name}': {e}")
+            return None
+        except ValueError as e:
+            scraper_logger.warning(
+                f"Invalid JSON returned for '{package_name}'"
+                f"{' version ' + version if version else ''}: {e}"
             )
             return None
         except Exception as e:
@@ -167,7 +173,7 @@ class PypiScraper:
 
             is_yanked = all(f.get("yanked", False) for f in release_files)
             yanked_reason = release_files[0].get("yanked_reason") if is_yanked else None
-            upload_time = release_files[0].get("upload_time_iso_8061")
+            upload_time = release_files[0].get("upload_time_iso_8601")
 
             releases.append(
                 PackageRelease(

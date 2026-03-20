@@ -40,3 +40,5 @@ testem.log
 # System files
 .DS_Store
 Thumbs.db
+/paipi-app-0.0.0.tgz
+.idea

@@ -12,6 +12,8 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional, cast
 
+from pydantic import ValidationError
+
 from .models import ReadmeRequest, SearchResponse
 
 
@@ -122,7 +124,7 @@ class CacheManager:
     def _generate_readme_hash(self, request: ReadmeRequest) -> str:
         """Generate a hash from README request for caching."""
         # Convert to dict and create deterministic hash
-        request_dict = request.dict()
+        request_dict = request.model_dump()
         request_str = json.dumps(request_dict, sort_keys=True)
         return hashlib.sha256(request_str.encode()).hexdigest()
 
@@ -153,7 +155,7 @@ class CacheManager:
                 results_data = json.loads(result[0])
                 return SearchResponse(**results_data)
 
-        except (sqlite3.Error, json.JSONDecodeError) as e:
+        except (sqlite3.Error, json.JSONDecodeError, ValidationError) as e:
             print(f"Error retrieving cached search results: {e}")
 
         return None
@@ -167,7 +169,7 @@ class CacheManager:
 
         try:
             cursor = self._connection.cursor()
-            results_json = response.json()
+            results_json = response.model_dump_json()
 
             cursor.execute(
                 """
@@ -202,7 +204,7 @@ class CacheManager:
                     results_data = json.loads(result[0])
                     response = SearchResponse(**results_data)
                     all_responses.append(response)
-                except json.JSONDecodeError as e:
+                except (json.JSONDecodeError, ValidationError) as e:
                     print(f"Error parsing cached search result: {e}")
                     continue
 
