@@ -130,10 +130,15 @@ class OpenRouterClientBase:
         """
         s = content.strip()
         if s.startswith("```"):
-            # tolerate ```json or ``` wrapping
             try:
+                # Remove opening fence
                 s = s.split("```", 1)[1]
-                s = s.split("```", 1)[0]
+                # If there's a language specifier like 'json', remove it
+                if s.lower().startswith("json"):
+                    s = s[4:]
+                # Remove closing fence
+                if "```" in s:
+                    s = s.rsplit("```", 1)[0]
             except Exception:
                 pass
-        return cast(dict[str, Any], json.loads(s))
+        return cast(dict[str, Any], json.loads(s.strip()))

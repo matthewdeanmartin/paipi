@@ -103,7 +103,7 @@ class OpenRouterClientReadMe:
             "- Prefer concise, accurate, copy-pasteable code blocks in `installation.code` and each `usage[].code`.\n"
             "- Omit sections that cannot be populated, or use empty arrays/strings.\n"
             "- Keep badges short (e.g., shields.io). Do not include HTML.\n\n"
-            f"Project metadata (authoritative): {json.dumps(req.dict(), ensure_ascii=False)}"
+            f"Project metadata (authoritative): {json.dumps(req.model_dump(), ensure_ascii=False)}"
         )
 
     # -----------------
@@ -159,7 +159,7 @@ class OpenRouterClientReadMe:
 
     def _build_readme_md_prompt(self, req: ReadmeRequest) -> str:
         """Create a Markdown-first README prompt with randomized, varied guidance."""
-        meta = req.dict()
+        meta = req.model_dump()
 
         # Present metadata as Markdown (not JSON)
         meta_md: List[str] = [

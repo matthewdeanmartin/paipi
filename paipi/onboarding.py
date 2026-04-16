@@ -41,6 +41,7 @@ def run_onboarding() -> str:
     print(_SEPARATOR)
 
     while True:
+        key = ""
         try:
             key = input(
                 "  Paste your OpenRouter API key (starts with sk-or-): "

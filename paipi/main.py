@@ -7,8 +7,9 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, AsyncIterator, Dict, Optional
 
 from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.responses import (
@@ -53,6 +54,70 @@ class AvailabilityResponseItem(BaseModel):
     readme_cached: bool
 
 
+async def startup_event() -> None:
+    """On startup, intelligently load and update the package cache."""
+    loop = asyncio.get_running_loop()
+
+    # This helper runs synchronous checks in a thread to not block the event loop
+    def check_cache_status() -> str:
+        if not CACHE_DB_PATH.exists():
+            return "missing"
+        if not package_cache.has_data():
+            return "empty"
+
+        # Check if cache is older than 24 hours (86400 seconds)
+        file_mod_time = os.path.getmtime(CACHE_DB_PATH)
+        if (time.time() - file_mod_time) > 86400:
+            return "outdated"
+
+        return "recent"
+
+    status = await loop.run_in_executor(None, check_cache_status)
+
+    if status == "recent":
+        print("Package cache is recent and populated. Loading into memory.")
+        await loop.run_in_executor(None, package_cache.load_into_memory)
+    elif status == "outdated":
+        print(
+            "Package cache is outdated. Loading stale data and triggering background update."
+        )
+        # Load the old data first for immediate availability
+        await loop.run_in_executor(None, package_cache.load_into_memory)
+        # Then start the background update without awaiting it
+        loop.run_in_executor(None, package_cache.update_cache)
+    elif status in ["missing", "empty"]:
+        if status == "missing":
+            print("Package cache database not found.")
+        else:  # empty
+            print("Package cache is empty.")
+        print("Triggering background update to populate cache.")
+        # Start the background update without awaiting it
+        loop.run_in_executor(None, package_cache.update_cache)
+
+    # Print cache manager stats
+    stats = cache_manager.get_cache_stats()
+    print(
+        f"Cache stats - Search: {stats['search']}, README: {stats['readme']}, Package: {stats['package']}"
+    )
+
+
+def shutdown_event() -> None:
+    """Close database connections on shutdown."""
+    package_cache.close()
+    cache_manager.close()
+    print("Cache database connections closed.")
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    """Run startup and shutdown hooks using FastAPI's lifespan API."""
+    await startup_event()
+    try:
+        yield
+    finally:
+        shutdown_event()
+
+
 # Create FastAPI app
 app = FastAPI(
     title=config.app_title,
@@ -60,7 +125,9 @@ app = FastAPI(
     version="0.1.0",
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
+
 
 # --- CORS MIDDLEWARE CONFIGURATION ---
 # Define the origins that are allowed to make requests to this API.
@@ -107,66 +174,6 @@ if _STATIC_DIR:
 
 
 # --- END STATIC FILE SERVING ---
-
-
-# --- STARTUP & SHUTDOWN EVENTS ---
-@app.on_event("startup")
-async def startup_event() -> None:
-    """On startup, intelligently load and update the package cache."""
-    loop = asyncio.get_event_loop()
-
-    # This helper runs synchronous checks in a thread to not block the event loop
-    def check_cache_status() -> str:
-        if not CACHE_DB_PATH.exists():
-            return "missing"
-        if not package_cache.has_data():
-            return "empty"
-
-        # Check if cache is older than 24 hours (86400 seconds)
-        file_mod_time = os.path.getmtime(CACHE_DB_PATH)
-        if (time.time() - file_mod_time) > 86400:
-            return "outdated"
-
-        return "recent"
-
-    status = await loop.run_in_executor(None, check_cache_status)
-
-    if status == "recent":
-        print("Package cache is recent and populated. Loading into memory.")
-        await loop.run_in_executor(None, package_cache.load_into_memory)
-    elif status == "outdated":
-        print(
-            "Package cache is outdated. Loading stale data and triggering background update."
-        )
-        # Load the old data first for immediate availability
-        await loop.run_in_executor(None, package_cache.load_into_memory)
-        # Then start the background update without awaiting it
-        loop.run_in_executor(None, package_cache.update_cache)
-    elif status in ["missing", "empty"]:
-        if status == "missing":
-            print("Package cache database not found.")
-        else:  # empty
-            print("Package cache is empty.")
-        print("Triggering background update to populate cache.")
-        # Start the background update without awaiting it
-        loop.run_in_executor(None, package_cache.update_cache)
-
-    # Print cache manager stats
-    stats = cache_manager.get_cache_stats()
-    print(
-        f"Cache stats - Search: {stats['search']}, README: {stats['readme']}, Package: {stats['package']}"
-    )
-
-
-@app.on_event("shutdown")
-def shutdown_event() -> None:
-    """Close database connections on shutdown."""
-    package_cache.close()
-    cache_manager.close()
-    print("Cache database connections closed.")
-
-
-# --- END STARTUP & SHUTDOWN EVENTS ---
 
 # Initialize OpenRouter client
 config.validate()
