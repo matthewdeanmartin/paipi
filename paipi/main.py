@@ -11,7 +11,13 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import Body, FastAPI, HTTPException, Query
-from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import (
+    FileResponse,
+    JSONResponse,
+    PlainTextResponse,
+    StreamingResponse,
+)
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.middleware.cors import CORSMiddleware
 
@@ -74,6 +80,33 @@ app.add_middleware(
 
 
 # --- END CORS CONFIGURATION ---
+
+
+# --- STATIC FILE SERVING (Angular SPA) ---
+# The built Angular app lives at paipi-app/dist/paipi-app/browser relative to
+# the repo root.  When installed as a package the files are shipped alongside
+# the Python source, so we look for them relative to this file first and fall
+# back to the repo layout.
+_HERE = Path(__file__).parent
+_STATIC_CANDIDATES = [
+    _HERE / "static",  # installed package
+    _HERE.parent / "paipi-app" / "dist" / "paipi-app" / "browser",  # repo dev
+]
+_STATIC_DIR: Optional[Path] = next((p for p in _STATIC_CANDIDATES if p.is_dir()), None)
+
+if _STATIC_DIR:
+    app.mount("/app", StaticFiles(directory=str(_STATIC_DIR), html=True), name="static")
+
+    @app.get("/app/{full_path:path}", include_in_schema=False)
+    async def serve_spa(full_path: str) -> FileResponse:  # type: ignore[return]
+        """Serve the Angular SPA index.html for any unmatched /app/* path."""
+        index = _STATIC_DIR / "index.html"  # type: ignore[operator]
+        if index.exists():
+            return FileResponse(str(index))
+        raise HTTPException(status_code=404, detail="UI not found")
+
+
+# --- END STATIC FILE SERVING ---
 
 
 # --- STARTUP & SHUTDOWN EVENTS ---
@@ -627,22 +660,50 @@ async def not_found_handler(_request: Any, _exc: Any) -> JSONResponse:
     )
 
 
-def main() -> None:
-    """Main entry point for running the server."""
+def _run_server() -> None:
+    """Start the uvicorn server (shared by main() and start())."""
     import uvicorn
 
-    print(f"Starting PAIPI server on {config.host}:{config.port}")
+    host = config.host
+    port = config.port
+    print(f"Starting PAIPI server on {host}:{port}")
     print(f"Debug mode: {config.debug}")
-    print(f"API documentation: http://{config.host}:{config.port}/docs")
+    print(f"API documentation: http://localhost:{port}/docs")
     print(f"Cache directory: {cache_manager.cache_dir}")
+    if _STATIC_DIR:
+        print(f"Web UI: http://localhost:{port}/app")
+    else:
+        print("Web UI: not found (run 'cd paipi-app && ng build' to build the UI)")
 
     uvicorn.run(
         "paipi.main:app",
-        host=config.host,
-        port=config.port,
+        host=host,
+        port=port,
         reload=config.debug,
         log_level="debug" if config.debug else "info",
     )
+
+
+def main() -> None:
+    """Entry point for `paipi` — starts the API server (no onboarding)."""
+    _run_server()
+
+
+def start() -> None:
+    """
+    Entry point for `paipi start` — runs first-run onboarding if needed,
+    then starts the full server (API + bundled Angular UI).
+    """
+    from paipi.onboarding import ensure_api_key
+
+    api_key = ensure_api_key()
+    # Make the freshly-entered key available to the rest of the process
+    # (config was already instantiated at import time, so patch it directly)
+    if api_key and not config.openrouter_api_key:
+        config.openrouter_api_key = api_key
+        os.environ["OPENROUTER_API_KEY"] = api_key
+
+    _run_server()
 
 
 if __name__ == "__main__":

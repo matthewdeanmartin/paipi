@@ -7,6 +7,7 @@ __all__ = [
     "__readme__",
     "__license__",
     "__requires_python__",
+    "__credits__",
     "__status__",
 ]
 
@@ -16,4 +17,5 @@ __description__ = "PyPI search, except the backend is an LLM's pixelated memory 
 __readme__ = "README.md"
 __license__ = "MIT"
 __requires_python__ = ">=3.14"
+__credits__ = [{"name": "Matthew Martin", "email": "matthewdeanmartin@gmail.com"}]
 __status__ = "3 - Alpha"

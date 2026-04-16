@@ -17,11 +17,10 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    # "Programming Language :: Python :: 3.13",
+
 ]
 dependencies = [
     "pydantic>=2.12.0; python_version >= '3.14'",
@@ -32,8 +31,8 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "untruncate_json",
     "httpx>=0.25.0",
-    "pypi_json"
-
+    "pypi_json",
+    "keyring>=24.0.0",
 ]
 
 [dependency-groups]
@@ -80,6 +79,7 @@ dev = [
     "linkcheckmd>=1.4.0; python_version >= '3.8'",
     "codespell>=2.2.6; python_version >= '3.8'",
     "pyenchant>=3.2.2; python_version >= '3.8'",
+    "tox"
 ]
 
 [project.urls]
@@ -88,6 +88,7 @@ Repository = "https://github.com/matthewdeanmartin/paipi"
 
 [project.scripts]
 paipi = "paipi.main:main"
+paipi-start = "paipi.main:start"
 
 [tool.black]
 line-length = 88
@@ -96,6 +97,13 @@ target-version = ['py38']
 [tool.isort]
 profile = "black"
 line_length = 88
+
+[tool.hatch.build.targets.wheel]
+# Include the pre-built Angular UI so `paipi start` can serve it out of the box.
+# Run `make ui-bundle` before building the wheel to populate paipi/static.
+include = [
+    "paipi/**",
+]
 
 [tool.mypy]
 # python_version = "3.11"

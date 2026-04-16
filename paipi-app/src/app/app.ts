@@ -18,7 +18,7 @@ import {PackageDetailComponent} from './package_page';
 export class App {
   // --- INJECTIONS & API CONFIG ---
   private http = inject(HttpClient);
-  private readonly apiUrl = 'http://127.0.0.1:8080';
+  private readonly apiUrl = '';
 
   // --- STATE MANAGEMENT WITH SIGNALS ---
   query = signal<string>('');

@@ -155,12 +155,25 @@ app-lint:
 	@echo "Linting Angular app"
 	cd $(APP_DIR) && $(NPM) run lint || true
 
+# Build Angular and copy the output into paipi/static so it ships with the
+# Python package and is served by `paipi start` / `python -m paipi start`.
+ui-bundle: app-install
+	@echo "Building Angular app for bundling into the Python package"
+	cd $(APP_DIR) && $(NPM) run build
+	@echo "Copying build output to paipi/static"
+	rm -rf $(PKG)/static
+	cp -r $(APP_DIR)/dist/paipi-app/browser $(PKG)/static
+
 # Simple launcher alias
 app: app-install app-start
 
 api: uv.lock
 	@echo "Starting PAIPI API"
 	$(VENV) python -m paipi
+
+start: uv.lock
+	@echo "Starting PAIPI (API + bundled UI)"
+	$(VENV) python -m paipi start
 
 ui: app-install app-start
 

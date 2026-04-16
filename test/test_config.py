@@ -3,7 +3,9 @@ import pytest
 from paipi.config import Config
 
 
-def test_config_uses_defaults_when_environment_is_missing(monkeypatch: pytest.MonkeyPatch):
+def test_config_uses_defaults_when_environment_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+):
     for variable in (
         "OPENROUTER_API_KEY",
         "OPENROUTER_BASE_URL",
@@ -22,7 +24,10 @@ def test_config_uses_defaults_when_environment_is_missing(monkeypatch: pytest.Mo
     assert config.openrouter_base_url == "https://openrouter.ai/api/v1"
     assert config.default_model == "anthropic/claude-3.5-sonnet"
     assert config.app_title == "PAIPI - AI-Powered PyPI Search"
-    assert config.app_description == "PyPI search powered by AI's knowledge of Python packages"
+    assert (
+        config.app_description
+        == "PyPI search powered by AI's knowledge of Python packages"
+    )
     assert config.host == "0.0.0.0"
     assert config.port == 8000
     assert config.debug is False

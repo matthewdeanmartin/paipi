@@ -39,7 +39,7 @@ export class PackageDetailComponent implements OnInit {
 
   private http = inject(HttpClient);
   private sanitizer = inject(DomSanitizer);
-  private readonly apiUrl = 'http://127.0.0.1:8080';
+  private readonly apiUrl = '';
 
   readmeContent = signal<string | null>(null);
   readmeIsLoading = signal<boolean>(false);

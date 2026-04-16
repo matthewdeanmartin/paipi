@@ -29,7 +29,9 @@ def test_search_cache_round_trip(cache_manager: CacheManager):
     response = SearchResponse(
         info={"source": "unit-test"},
         results=[
-            SearchResult(name="demo-package", version="1.2.3", summary="Example package")
+            SearchResult(
+                name="demo-package", version="1.2.3", summary="Example package"
+            )
         ],
     )
 
@@ -73,9 +75,9 @@ def test_cache_readme_persists_to_database_and_filesystem(cache_manager: CacheMa
     assert cache_manager.get_cached_readme(request) == markdown
     assert cache_manager.has_readme_by_name("demo-package") is True
     assert cache_manager.get_readme_by_name("demo-package") == markdown
-    assert (
-        cache_manager.packages_dir / "demo-package" / "README.md"
-    ).read_text(encoding="utf-8") == markdown
+    assert (cache_manager.packages_dir / "demo-package" / "README.md").read_text(
+        encoding="utf-8"
+    ) == markdown
 
 
 def test_get_cached_package_removes_stale_database_entries(cache_manager: CacheManager):
@@ -87,7 +89,9 @@ def test_get_cached_package_removes_stale_database_entries(cache_manager: CacheM
     assert cache_manager.has_package_by_name("demo-package") is False
 
 
-def test_generate_stub_package_creates_installable_structure(cache_manager: CacheManager):
+def test_generate_stub_package_creates_installable_structure(
+    cache_manager: CacheManager,
+):
     zip_bytes = cache_manager.generate_stub_package(
         "demo-package",
         {"version": "2.0.0", "author": "Copilot", "description": "A demo package"},
