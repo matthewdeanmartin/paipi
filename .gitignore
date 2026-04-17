@@ -210,3 +210,4 @@ paipi_cache.db
 /examples/test_run/
 /logs/
 .idea
+junit.xml

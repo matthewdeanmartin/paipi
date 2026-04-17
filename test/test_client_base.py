@@ -75,3 +75,73 @@ def test_ask_llm_to_fix_json_error(client):
     )
     result = client.ask_llm_to_fix_json("broken")
     assert result is None
+
+
+def test_create_chat_completion_falls_back_to_next_model(client):
+    rate_limit_error = Exception(
+        "Error code: 429 - {'error': {'message': 'Rate limit exceeded: free-models-per-min.'}}"
+    )
+    mock_response = MagicMock()
+    mock_response.model = "anthropic/claude-3.5-sonnet"
+    mock_response.choices[0].message.content = "ok"
+    client.client.chat.completions.create = MagicMock(
+        side_effect=[rate_limit_error, mock_response]
+    )
+
+    with patch("paipi.client_base.config") as mock_config:
+        mock_config.default_model = "google/gemma-4-31b-it:free"
+        mock_config.openrouter_models = [
+            "google/gemma-4-31b-it:free",
+            "anthropic/claude-3.5-sonnet",
+        ]
+        mock_config.rotate_models = False
+
+        result = client.create_chat_completion(
+            messages=[{"role": "user", "content": "hello"}],
+            temperature=0.0,
+            max_tokens=100,
+        )
+
+    assert result.content == "ok"
+    assert result.model_used == "anthropic/claude-3.5-sonnet"
+    assert result.attempted_models == [
+        "google/gemma-4-31b-it:free",
+        "anthropic/claude-3.5-sonnet",
+    ]
+
+
+def test_create_chat_completion_stops_retrying_unavailable_model(client):
+    OpenRouterClientBase._permanently_disabled_models.clear()
+    OpenRouterClientBase._temporarily_disabled_models.clear()
+
+    missing_model_error = Exception(
+        "Error code: 404 - {'error': {'message': 'No endpoints found for dead-model.', 'code': 404}}"
+    )
+    success_response = MagicMock()
+    success_response.model = "good-model"
+    success_response.choices[0].message.content = "ok"
+
+    client.client.chat.completions.create = MagicMock(
+        side_effect=[missing_model_error, success_response]
+    )
+
+    with patch("paipi.client_base.config") as mock_config:
+        mock_config.default_model = "dead-model"
+        mock_config.openrouter_models = ["dead-model", "good-model"]
+        mock_config.rotate_models = False
+
+        first = client.create_chat_completion(
+            messages=[{"role": "user", "content": "hello"}],
+            temperature=0.0,
+            max_tokens=100,
+        )
+
+        client.client.chat.completions.create = MagicMock(return_value=success_response)
+        second = client.create_chat_completion(
+            messages=[{"role": "user", "content": "hello again"}],
+            temperature=0.0,
+            max_tokens=100,
+        )
+
+    assert first.attempted_models == ["dead-model", "good-model"]
+    assert second.attempted_models == ["good-model"]

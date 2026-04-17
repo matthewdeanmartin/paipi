@@ -52,8 +52,7 @@ class OpenRouterClientReadMe:
         prompt = self._build_readme_prompt(req)
 
         try:
-            response = self.client.chat.completions.create(
-                model=config.default_model,
+            response = self.base.create_chat_completion(
                 messages=[
                     {
                         "role": "system",
@@ -68,7 +67,7 @@ class OpenRouterClientReadMe:
                 max_tokens=4000,
             )
 
-            content = response.choices[0].message.content or ""
+            content = response.content
             data = self.base.extract_json(content)
             return self._render_readme_markdown(data)
 
@@ -110,6 +109,13 @@ class OpenRouterClientReadMe:
     # README (NEW MARKDOWN-FIRST)
     # -----------------
     def generate_readme_markdown(self, req: ReadmeRequest) -> str:
+        """Return only README markdown for legacy callers."""
+        markdown, _ = self.generate_readme_markdown_with_model(req)
+        return markdown
+
+    def generate_readme_markdown_with_model(
+        self, req: ReadmeRequest
+    ) -> tuple[str, Optional[str]]:
         """
         NEW WAY: Ask the LLM to directly produce clean Markdown (no JSON),
         showing project metadata in a human-readable Markdown block.
@@ -120,8 +126,7 @@ class OpenRouterClientReadMe:
         prompt = self._build_readme_md_prompt(req)
 
         try:
-            response = self.client.chat.completions.create(
-                model=config.default_model,
+            response = self.base.create_chat_completion(
                 messages=[
                     {
                         "role": "system",
@@ -136,7 +141,7 @@ class OpenRouterClientReadMe:
                 max_tokens=4000,
             )
 
-            content = response.choices[0].message.content or ""
+            content = response.content or ""
             llm_logger.debug(
                 f"[generate_readme_markdown for {req.name}] RAW LLM RESPONSE:\n---\n{content[:2000]}\n---"
             )
@@ -148,14 +153,17 @@ class OpenRouterClientReadMe:
                     s = s.rsplit("```", 1)[0]
                 except Exception:
                     pass
-            return s.strip() + ("\n" if not s.endswith("\n") else "")
+            return s.strip() + ("\n" if not s.endswith("\n") else ""), response.model_used
 
         except Exception as e:
             print(f"Error generating README (markdown) via OpenRouter: {e}")
             llm_logger.error(
                 f"Error generating README (markdown) via OpenRouter for '{req.name}': {e}"
             )
-            return f"# {req.name}\n\n{req.summary or ''}\n\n> README generation failed. Please try again."
+            return (
+                f"# {req.name}\n\n{req.summary or ''}\n\n> README generation failed. Please try again.",
+                None,
+            )
 
     def _build_readme_md_prompt(self, req: ReadmeRequest) -> str:
         """Create a Markdown-first README prompt with randomized, varied guidance."""

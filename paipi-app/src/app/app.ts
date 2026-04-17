@@ -18,12 +18,14 @@ import {PackageDetailComponent} from './package_page';
 export class App {
   // --- INJECTIONS & API CONFIG ---
   private http = inject(HttpClient);
-  private readonly apiUrl = '';
+  private readonly apiUrl = '/api';
 
   // --- STATE MANAGEMENT WITH SIGNALS ---
   query = signal<string>('');
   lastQuery = signal<string>('');
   searchResults = signal<SearchResult[]>([]);
+  searchModel = signal<string | null>(null);
+  searchModelsTried = signal<string[]>([]);
   isLoading = signal<boolean>(false);
   error = signal<string | null>(null);
   searchPerformed = signal<boolean>(false);
@@ -40,6 +42,26 @@ export class App {
         console.log(`%c[EFFECT] selectedPackage changed to: null`, 'color: #7DF9FF');
       }
     });
+  }
+
+  private getApiErrorMessage(error: HttpErrorResponse): string {
+    const payload = error.error;
+    if (typeof payload === 'string' && payload.trim()) {
+      return payload.trim();
+    }
+    if (payload && typeof payload === 'object') {
+      const detail = payload.detail;
+      if (typeof detail === 'string' && detail.trim()) {
+        return detail.trim();
+      }
+      const message = payload.message;
+      if (typeof message === 'string' && message.trim()) {
+        return message.trim();
+      }
+    }
+
+    const fallback = error.message || error.statusText;
+    return fallback ? fallback.trim() : `Request failed with status ${error.status}`;
   }
 
   // --- MODIFIED: The corrected handler ---
@@ -81,6 +103,8 @@ export class App {
     this.lastQuery.set(currentQuery);
     this.error.set(null);
     this.searchResults.set([]);
+    this.searchModel.set(null);
+    this.searchModelsTried.set([]);
     this.selectedPackage.set(null); // Reset detail view on new search
 
     try {
@@ -88,11 +112,13 @@ export class App {
       // const response = await this.mockApiSearch(currentQuery);
       const response = await this.apiSearch(currentQuery)
       this.searchResults.set(response.results);
+      this.searchModel.set(response.info.model_used ?? null);
+      this.searchModelsTried.set(response.info.models_tried ?? []);
     } catch (e: any) {
       console.error('API Error:', e);
       let message = 'Failed to fetch results from the server.';
       if (e instanceof HttpErrorResponse) {
-        message = `Error ${e.status}: ${e.statusText}`;
+        message = this.getApiErrorMessage(e);
       } else if (e.message) {
         message = e.message;
       }
@@ -136,7 +162,7 @@ export class App {
    * @returns A Promise that resolves to a SearchResponse.
    */
   private apiSearch(q: string): Promise<SearchResponse> {
-    const searchUrl = `${this.apiUrl}/search?q=${encodeURIComponent(q)}&size=20`;
+      const searchUrl = `${this.apiUrl}/search?q=${encodeURIComponent(q)}&size=20`;
     console.log(`Fetching from API: ${searchUrl}`);
     return firstValueFrom(this.http.get<SearchResponse>(searchUrl));
   }

@@ -43,7 +43,8 @@ To install and run web server
 
 ```bash
 uv sync
-uv run paipi
+make ui-bundle
+uv run paipi-start
 ```
 
 To install and run UI
@@ -71,11 +72,17 @@ Required environment variables:
 Optional environment variables:
 
 - `OPENROUTER_BASE_URL`: OpenRouter API base URL (default: https://openrouter.ai/api/v1)
-- `OPENROUTER_MODEL`: AI model to use (default: anthropic/claude-3.5-sonnet)
+- `OPENROUTER_MODEL`: Primary model/router to use (default: `openrouter/free`)
+- `OPENROUTER_MODELS`: Comma- or newline-separated model pool. PAIPI rotates starting models across requests, filters configured models against the live OpenRouter catalog at startup, and falls back through the remaining models on rate limits or provider/model availability failures.
+- `OPENROUTER_ROTATE_MODELS`: Set to `false` to always start with `OPENROUTER_MODEL` instead of round-robin rotation
 - `HOST`: Server host (default: 0.0.0.0)
 - `PORT`: Server port (default: 8000)
 - `DEBUG`: Enable debug mode (default: false)
 - `OPENAI_API_KEY`: This is used for package generation using openinterpreter (running inside docer)
+
+On first-run onboarding, PAIPI now fetches the current OpenRouter model catalog, shows shortlisted free/cheap text models, and lets you save a preferred model pool into your local `.env`.
+
+Search results, cached READMEs, and generated package downloads retain the model that produced them, and the UI shows that model in the search results and package detail view.
 
 ## Usage
 
@@ -83,7 +90,7 @@ Optional environment variables:
 
 ```bash
 # Using the CLI command
-paipi
+paipi-start
 
 # Or directly with Python
 python -m paipi.main
@@ -92,25 +99,25 @@ python -m paipi.main
 uvicorn paipi.main:app --host 0.0.0.0 --port 8000
 ```
 
+The web UI is served at `/` and the API is served under `/api`.
+
 ### API Endpoints
 
-- `GET /` - Root endpoint with basic information
-- `GET /health` - Health check endpoint
-- `GET /search?q=<query>` - Search for Python packages
-- `GET /docs` - Interactive API documentation
-- `GET /redoc` - Alternative API documentation
-- `GET /search?q=<query>` - Search for packages
-- `POST /readme` - Generate README.md
-- `POST /generate_package` - Generate package ZIP
-- `GET /cache/stats` - Get cache statistics
-- `DELETE /cache/clear` - Clear cache
-- `GET /docs` - Interactive API documentation
-- `GET /health` - Health check
+- `GET /` - Web UI
+- `GET /api` - API root endpoint with basic information
+- `GET /api/health` - Health check endpoint
+- `GET /api/search?q=<query>` - Search for Python packages
+- `GET /api/docs` - Interactive API documentation
+- `GET /api/redoc` - Alternative API documentation
+- `POST /api/readme` - Generate README.md
+- `POST /api/generate_package` - Generate package ZIP
+- `GET /api/cache/stats` - Get cache statistics
+- `DELETE /api/cache/clear` - Clear cache
 
 ### Search Example
 
 ```bash
-curl "http://localhost:8000/search?q=web+framework&size=5"
+curl "http://localhost:8000/api/search?q=web+framework&size=5"
 ```
 
 Response format matches PyPI search API:

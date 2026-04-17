@@ -101,6 +101,10 @@ class CacheManager:
                     TEXT
                     NOT
                     NULL,
+                    package_model
+                    TEXT
+                    DEFAULT
+                    '',
                     created_at
                     TIMESTAMP
                     DEFAULT
@@ -109,12 +113,28 @@ class CacheManager:
                 """
             )
 
+            self._ensure_column("readme_cache", "readme_model", "TEXT")
+            self._ensure_column("package_cache", "package_model", "TEXT NOT NULL DEFAULT ''")
+
             self._connection.commit()
             print(f"Cache database initialized at {self.db_path}")
 
         except sqlite3.Error as e:
             print(f"Database error during cache initialization: {e}")
             self._connection = None
+
+    def _ensure_column(self, table: str, column: str, definition: str) -> None:
+        """Add a cache metadata column if it does not exist yet."""
+        if not self._connection:
+            return
+
+        cursor = self._connection.cursor()
+        cursor.execute(f"PRAGMA table_info({table})")
+        existing_columns = {row[1] for row in cursor.fetchall()}
+        if column in existing_columns:
+            return
+
+        cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def _generate_query_key(self, query: str) -> str:
         """Generate a cache key from search query (lowercase, stripped, order preserved)."""
@@ -239,7 +259,12 @@ class CacheManager:
 
         return None
 
-    def cache_readme(self, request: ReadmeRequest, markdown_content: str) -> None:
+    def cache_readme(
+        self,
+        request: ReadmeRequest,
+        markdown_content: str,
+        model_used: Optional[str] = None,
+    ) -> None:
         """Cache README markdown content and save to file."""
         if not self._connection:
             return
@@ -253,10 +278,10 @@ class CacheManager:
             cursor.execute(
                 """
                 INSERT OR REPLACE INTO readme_cache 
-                (request_hash, package_name, markdown_content) 
-                VALUES (?, ?, ?)
+                (request_hash, package_name, markdown_content, readme_model) 
+                VALUES (?, ?, ?, ?)
             """,
-                (request_hash, package_name, markdown_content),
+                (request_hash, package_name, markdown_content, model_used),
             )
 
             self._connection.commit()
@@ -310,6 +335,29 @@ class CacheManager:
         except sqlite3.Error as e:
             print(f"Error fetching README by name: {e}")
             return None
+
+    def get_readme_metadata_by_name(self, package_name: str) -> Dict[str, Any]:
+        """Return metadata for the most recent cached README by package name."""
+        if not self._connection:
+            return {}
+        try:
+            c = self._connection.cursor()
+            c.execute(
+                """
+                SELECT readme_model, created_at
+                FROM readme_cache
+                WHERE package_name = ?
+                ORDER BY datetime(created_at) DESC LIMIT 1
+                """,
+                (package_name,),
+            )
+            row = c.fetchone()
+            if not row:
+                return {}
+            return {"model": row[0] or None, "created_at": row[1]}
+        except sqlite3.Error as e:
+            print(f"Error fetching README metadata by name: {e}")
+            return {}
 
     def list_readme_packages(self) -> List[Dict[str, Any]]:
         """Return list of packages for which we have cached READMEs."""
@@ -409,7 +457,9 @@ class CacheManager:
             print(f"Error retrieving search history: {e}")
             return []
 
-    def cache_package(self, package_name: str, zip_bytes: bytes) -> None:
+    def cache_package(
+        self, package_name: str, zip_bytes: bytes, model_used: Optional[str] = None
+    ) -> None:
         """Cache package ZIP bytes to file and database."""
         if not self._connection:
             return
@@ -427,10 +477,10 @@ class CacheManager:
             cursor.execute(
                 """
                 INSERT OR REPLACE INTO package_cache 
-                (package_name, zip_path) 
-                VALUES (?, ?)
+                (package_name, zip_path, package_model) 
+                VALUES (?, ?, ?)
             """,
-                (package_name, str(zip_path)),
+                (package_name, str(zip_path), model_used or ""),
             )
 
             self._connection.commit()
@@ -438,6 +488,29 @@ class CacheManager:
 
         except (sqlite3.Error, OSError) as e:
             print(f"Error caching package: {e}")
+
+    def get_package_metadata_by_name(self, package_name: str) -> Dict[str, Any]:
+        """Return metadata for a cached package ZIP by package name."""
+        if not self._connection:
+            return {}
+        try:
+            c = self._connection.cursor()
+            c.execute(
+                """
+                SELECT package_model, created_at
+                FROM package_cache
+                WHERE package_name = ?
+                LIMIT 1
+                """,
+                (package_name,),
+            )
+            row = c.fetchone()
+            if not row:
+                return {}
+            return {"model": row[0] or None, "created_at": row[1]}
+        except sqlite3.Error as e:
+            print(f"Error fetching package metadata by name: {e}")
+            return {}
 
     def generate_stub_package(
         self, package_name: str, metadata: Optional[Dict[str, Any]] = None

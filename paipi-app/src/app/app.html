@@ -92,6 +92,16 @@
                 Showing {{ searchResults().length }} result{{ searchResults().length === 1 ? '' : 's' }}
                 for “{{ lastQuery() }}”.
               </p>
+              @if (searchModel()) {
+                <p class="text-xs text-slate-500">
+                  Search model: <span class="font-medium text-slate-700">{{ searchModel() }}</span>
+                  @if (searchModelsTried().length > 1) {
+                    <span class="ml-1">
+                      (tried {{ searchModelsTried().join(' -> ') }})
+                    </span>
+                  }
+                </p>
+              }
 
               @for (pkg of searchResults(); track pkg.name) {
                 <div

@@ -70,23 +70,36 @@ def test_cache_readme_persists_to_database_and_filesystem(cache_manager: CacheMa
     request = ReadmeRequest(name="demo-package", summary="Summary")
     markdown = "# demo-package\n"
 
-    cache_manager.cache_readme(request, markdown)
+    cache_manager.cache_readme(request, markdown, "anthropic/claude-3.5-sonnet")
 
     assert cache_manager.get_cached_readme(request) == markdown
     assert cache_manager.has_readme_by_name("demo-package") is True
     assert cache_manager.get_readme_by_name("demo-package") == markdown
+    assert (
+        cache_manager.get_readme_metadata_by_name("demo-package")["model"]
+        == "anthropic/claude-3.5-sonnet"
+    )
     assert (cache_manager.packages_dir / "demo-package" / "README.md").read_text(
         encoding="utf-8"
     ) == markdown
 
 
 def test_get_cached_package_removes_stale_database_entries(cache_manager: CacheManager):
-    cache_manager.cache_package("demo-package", b"zip-bytes")
+    cache_manager.cache_package("demo-package", b"zip-bytes", "gpt-4o-mini")
     zip_path = cache_manager.packages_dir / "demo-package" / "demo-package.zip"
     zip_path.unlink()
 
     assert cache_manager.get_cached_package("demo-package") is None
     assert cache_manager.has_package_by_name("demo-package") is False
+
+
+def test_package_cache_metadata_round_trip(cache_manager: CacheManager):
+    cache_manager.cache_package("demo-package", b"zip-bytes", "gpt-4o-mini")
+
+    assert (
+        cache_manager.get_package_metadata_by_name("demo-package")["model"]
+        == "gpt-4o-mini"
+    )
 
 
 def test_generate_stub_package_creates_installable_structure(

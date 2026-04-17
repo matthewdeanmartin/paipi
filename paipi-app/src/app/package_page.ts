@@ -39,12 +39,14 @@ export class PackageDetailComponent implements OnInit {
 
   private http = inject(HttpClient);
   private sanitizer = inject(DomSanitizer);
-  private readonly apiUrl = '';
+  private readonly apiUrl = '/api';
 
   readmeContent = signal<string | null>(null);
   readmeIsLoading = signal<boolean>(false);
   packageIsLoading = signal<boolean>(false);
   readmeError = signal<string | null>(null);
+  readmeModel = signal<string | null>(null);
+  packageModel = signal<string | null>(null);
 
   safeReadmeHtml = computed<SafeHtml | null>(() => {
     const markdown = this.readmeContent();
@@ -70,12 +72,15 @@ export class PackageDetailComponent implements OnInit {
       const availabilityUrl = `${this.apiUrl}/availability?name=${encodeURIComponent(this.package.name)}`;
       console.log(`[PackageDetail] Checking availability at: ${availabilityUrl}`);
       const availability = await firstValueFrom(this.http.get<AvailabilityResponse>(availabilityUrl));
+      this.readmeModel.set(availability.readme_model ?? this.package.readme_model ?? null);
+      this.packageModel.set(availability.package_model ?? this.package.package_model ?? null);
 
       if (availability.readme_cached) {
         console.log(`[PackageDetail] README is cached on server. Fetching content...`);
         const readmeUrl = `${this.apiUrl}/readme/by-name/${encodeURIComponent(this.package.name)}`;
-        const markdown = await firstValueFrom(this.http.get(readmeUrl, { responseType: 'text' }));
-        this.readmeContent.set(markdown);
+        const response = await firstValueFrom(this.http.get(readmeUrl, { responseType: 'text', observe: 'response' }));
+        this.readmeContent.set(response.body ?? '');
+        this.readmeModel.set(response.headers.get('X-PAIPI-Model-Used') ?? this.readmeModel());
       } else {
         console.log(`[PackageDetail] README is not cached on server. Waiting for user to generate.`);
       }
@@ -106,8 +111,11 @@ export class PackageDetailComponent implements OnInit {
     };
 
     try {
-      const markdown = await firstValueFrom(this.http.post(`${this.apiUrl}/readme`, payload, { responseType: 'text' }));
-      this.readmeContent.set(markdown);
+      const response = await firstValueFrom(
+        this.http.post(`${this.apiUrl}/readme`, payload, { responseType: 'text', observe: 'response' })
+      );
+      this.readmeContent.set(response.body ?? '');
+      this.readmeModel.set(response.headers.get('X-PAIPI-Model-Used'));
 
       // --- NEW: Emit event to parent on success ---
       console.log(`[PackageDetail] Emitting readmeGenerated event for '${this.package.name}'`);
@@ -132,7 +140,14 @@ export class PackageDetailComponent implements OnInit {
     };
 
     try {
-      const blob = await firstValueFrom(this.http.post(`${this.apiUrl}/generate_package`, payload, { responseType: 'blob' }));
+      const response = await firstValueFrom(
+        this.http.post(`${this.apiUrl}/generate_package`, payload, { responseType: 'blob', observe: 'response' })
+      );
+      const blob = response.body;
+      if (!blob) {
+        throw new Error('The server returned an empty package archive.');
+      }
+      this.packageModel.set(response.headers.get('X-PAIPI-Model-Used'));
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -156,6 +171,7 @@ export class PackageDetailComponent implements OnInit {
   resetReadme(): void {
     this.readmeContent.set(null);
     this.readmeError.set(null);
+    this.readmeModel.set(null);
   }
 
   /**

@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -21,20 +21,20 @@ def client(test_caches):
 def test_root_endpoint(client):
     response = client.get("/")
     assert response.status_code == 200
-    assert "Welcome to PAIPI" in response.json()["message"]
+    assert "<app-root" in response.text
 
 
 def test_health_endpoint(client):
-    response = client.get("/health")
+    response = client.get("/api/health")
     assert response.status_code == 200
     assert response.json()["status"] == "healthy"
 
 
-@patch("paipi.main.ai_client.search_packages")
+@patch("paipi.main.ai_client", new_callable=MagicMock)
 @patch("paipi.main.pypi_scraper.get_project_metadata")
 def test_search_endpoint(mock_pypi, mock_ai, client):
     # Mock AI response
-    mock_ai.return_value = SearchResponse(
+    mock_ai.search_packages.return_value = SearchResponse(
         info={"query": "test"},
         results=[SearchResult(name="pkg1", version="1.0.0", package_exists=True)],
     )
@@ -47,7 +47,7 @@ def test_search_endpoint(mock_pypi, mock_ai, client):
         }
     }
 
-    response = client.get("/search?q=test")
+    response = client.get("/api/search?q=test")
     assert response.status_code == 200
     data = response.json()
     assert len(data["results"]) == 1
@@ -55,22 +55,27 @@ def test_search_endpoint(mock_pypi, mock_ai, client):
     assert data["results"][0]["version"] == "1.0.1"
 
 
-@patch("paipi.main.readme_client.generate_readme_markdown")
-def test_readme_endpoint(mock_readme, client):
-    mock_readme.return_value = "# Generated README"
+@patch("paipi.main.ai_client", new_callable=MagicMock)
+@patch("paipi.main.readme_client", new_callable=MagicMock)
+def test_readme_endpoint(mock_readme, _mock_ai, client):
+    mock_readme.generate_readme_markdown_with_model.return_value = (
+        "# Generated README",
+        "anthropic/claude-3.5-sonnet",
+    )
 
-    response = client.post("/readme", json={"name": "test-pkg"})
+    response = client.post("/api/readme", json={"name": "test-pkg"})
     assert response.status_code == 200
     assert response.text == "# Generated README"
+    assert response.headers["x-paipi-model-used"] == "anthropic/claude-3.5-sonnet"
 
 
 def test_cache_stats_endpoint(client):
-    response = client.get("/cache/stats")
+    response = client.get("/api/cache/stats")
     assert response.status_code == 200
     assert "cache_stats" in response.json()
 
 
 def test_clear_cache_endpoint(client):
-    response = client.delete("/cache/clear?cache_type=search")
+    response = client.delete("/api/cache/clear?cache_type=search")
     assert response.status_code == 200
     assert "Cleared search cache(s)" in response.json()["message"]

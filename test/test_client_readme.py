@@ -15,10 +15,11 @@ def client():
 
 def test_generate_readme_legacy(client):
     mock_response = MagicMock()
+    mock_response.model = "anthropic/claude-3.5-sonnet"
     mock_response.choices[0].message.content = (
         '{"title": "Test", "description": "Desc"}'
     )
-    client.client.chat.completions.create = MagicMock(return_value=mock_response)
+    client.base.client.chat.completions.create = MagicMock(return_value=mock_response)
 
     req = ReadmeRequest(name="test-pkg")
     readme = client.generate_readme(req)
@@ -29,7 +30,7 @@ def test_generate_readme_legacy(client):
 
 
 def test_generate_readme_legacy_error(client):
-    client.client.chat.completions.create = MagicMock(
+    client.base.client.chat.completions.create = MagicMock(
         side_effect=Exception("API error")
     )
 
@@ -43,8 +44,9 @@ def test_generate_readme_legacy_error(client):
 
 def test_generate_readme_markdown(client):
     mock_response = MagicMock()
+    mock_response.model = "anthropic/claude-3.5-sonnet"
     mock_response.choices[0].message.content = "# Markdown README\n\nSome content."
-    client.client.chat.completions.create = MagicMock(return_value=mock_response)
+    client.base.client.chat.completions.create = MagicMock(return_value=mock_response)
 
     req = ReadmeRequest(name="test-pkg")
     readme = client.generate_readme_markdown(req)
@@ -55,8 +57,9 @@ def test_generate_readme_markdown(client):
 
 def test_generate_readme_markdown_with_fences(client):
     mock_response = MagicMock()
+    mock_response.model = "anthropic/claude-3.5-sonnet"
     mock_response.choices[0].message.content = "```markdown\n# Fenced README\n```"
-    client.client.chat.completions.create = MagicMock(return_value=mock_response)
+    client.base.client.chat.completions.create = MagicMock(return_value=mock_response)
 
     req = ReadmeRequest(name="test-pkg")
     readme = client.generate_readme_markdown(req)
@@ -66,7 +69,7 @@ def test_generate_readme_markdown_with_fences(client):
 
 
 def test_generate_readme_markdown_error(client):
-    client.client.chat.completions.create = MagicMock(
+    client.base.client.chat.completions.create = MagicMock(
         side_effect=Exception("API error")
     )
 
@@ -75,3 +78,16 @@ def test_generate_readme_markdown_error(client):
 
     assert "# test-pkg" in readme
     assert "README generation failed" in readme
+
+
+def test_generate_readme_markdown_with_model(client):
+    mock_response = MagicMock()
+    mock_response.model = "openai/gpt-4.1-mini"
+    mock_response.choices[0].message.content = "# Markdown README\n"
+    client.base.client.chat.completions.create = MagicMock(return_value=mock_response)
+
+    req = ReadmeRequest(name="test-pkg")
+    readme, model_used = client.generate_readme_markdown_with_model(req)
+
+    assert readme == "# Markdown README\n"
+    assert model_used == "openai/gpt-4.1-mini"

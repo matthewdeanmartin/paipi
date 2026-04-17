@@ -2,13 +2,17 @@ from unittest.mock import patch
 
 import pytest
 
-from paipi.onboarding import ensure_api_key, run_onboarding
+from paipi.onboarding import ensure_api_key, prompt_for_models, run_onboarding
 
 
 def test_run_onboarding_success():
     with patch("builtins.input", return_value="sk-or-fake-key"), patch(
         "paipi.config.save_api_key"
-    ) as mock_save:
+    ) as mock_save, patch(
+        "paipi.onboarding.prompt_for_models", return_value=["openrouter/free"]
+    ), patch(
+        "paipi.onboarding.save_model_preferences", return_value=["openrouter/free"]
+    ):
         key = run_onboarding()
         assert key == "sk-or-fake-key"
         mock_save.assert_called_once_with("sk-or-fake-key")
@@ -18,7 +22,11 @@ def test_run_onboarding_retry_then_success():
     # First input is empty, second is invalid, third is valid
     with patch(
         "builtins.input", side_effect=["", "invalid-key", "sk-or-valid-key"]
-    ), patch("paipi.config.save_api_key") as mock_save:
+    ), patch("paipi.config.save_api_key") as mock_save, patch(
+        "paipi.onboarding.prompt_for_models", return_value=["openrouter/free"]
+    ), patch(
+        "paipi.onboarding.save_model_preferences", return_value=["openrouter/free"]
+    ):
         key = run_onboarding()
         assert key == "sk-or-valid-key"
         mock_save.assert_called_once_with("sk-or-valid-key")
@@ -46,3 +54,12 @@ def test_ensure_api_key_runs_onboarding():
         key = ensure_api_key()
         assert key == "new-key"
         mock_onboarding.assert_called_once()
+
+
+def test_prompt_for_models_uses_fallback_when_fetch_fails():
+    with patch(
+        "paipi.onboarding.fetch_models", side_effect=RuntimeError("nope")
+    ), patch("builtins.input", return_value=""):
+        models = prompt_for_models("sk-or-fake-key")
+
+    assert models == ["openrouter/free"]

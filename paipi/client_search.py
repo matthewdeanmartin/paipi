@@ -25,6 +25,10 @@ from .models import SearchResponse, SearchResult
 from .package_cache import package_cache
 
 
+class SearchGenerationError(RuntimeError):
+    """Raised when AI-backed search fails and the UI should show the real error."""
+
+
 class OpenRouterClientSearch:
     """
     Client for interacting with OpenRouter AI service via OpenAI interface.
@@ -49,7 +53,7 @@ class OpenRouterClientSearch:
 
     def _generate_package_name_candidates(
         self, query: str, limit: int, max_iterations: int = 5
-    ) -> List[str]:
+    ) -> tuple[List[str], Optional[str], list[str]]:
         """
         Iteratively asks the LLM to generate a list of relevant package names.
 
@@ -63,6 +67,8 @@ class OpenRouterClientSearch:
         """
         found_packages: set[str] = set()
         iteration = 0
+        model_used: Optional[str] = None
+        attempted_models: list[str] = []
         messages = [
             {
                 "role": "system",
@@ -96,13 +102,14 @@ class OpenRouterClientSearch:
                 llm_logger.debug(
                     f"Name Generation Iteration {iteration}: Requesting {num_needed} packages."
                 )
-                response = self.client.chat.completions.create(
-                    model=config.default_model,
+                response = self.base.create_chat_completion(
                     messages=messages,  # type: ignore
                     temperature=0.6,
                     max_tokens=1000,
                 )
-                content = response.choices[0].message.content or ""
+                content = response.content
+                model_used = response.model_used
+                attempted_models = response.attempted_models
                 llm_logger.debug(f"RAW LLM Name Response:\n---\n{content}\n---")
 
                 # Add assistant's response to maintain conversation context
@@ -121,14 +128,15 @@ class OpenRouterClientSearch:
                             break
 
             except Exception as e:
-                llm_logger.error(f"Error during package name generation: {e}")
-                break  # Exit loop on API error
+                message = self.base.format_llm_error(e)
+                llm_logger.error(f"Error during package name generation: {message}")
+                raise SearchGenerationError(message) from e
 
-        return list(found_packages)[:limit]
+        return list(found_packages)[:limit], model_used, attempted_models
 
     def _generate_metadata_for_fake_packages(
         self, package_names: List[str], query: str, batch_size: int = 3
-    ) -> Dict[str, SearchResult]:
+    ) -> tuple[Dict[str, SearchResult], list[str]]:
         """
         Generates full, realistic-looking metadata for a list of non-existent package names.
 
@@ -141,17 +149,17 @@ class OpenRouterClientSearch:
             A dictionary mapping each package name to its generated SearchResult object.
         """
         if not package_names:
-            return {}
+            return {}, []
 
         generated_results = {}
+        metadata_models_used: list[str] = []
         for i in range(0, len(package_names), batch_size):
             batch = package_names[i : i + batch_size]
             llm_logger.info(f"Generating metadata for fake packages batch: {batch}")
 
             prompt = self._build_metadata_prompt(batch, query)
             try:
-                response = self.client.chat.completions.create(
-                    model=config.default_model,
+                response = self.base.create_chat_completion(
                     messages=[
                         {
                             "role": "system",
@@ -167,7 +175,9 @@ class OpenRouterClientSearch:
                     temperature=0.7,
                     max_tokens=4000,
                 )
-                content = response.choices[0].message.content
+                content = response.content
+                if response.model_used not in metadata_models_used:
+                    metadata_models_used.append(response.model_used)
                 llm_logger.debug(
                     f"RAW LLM Metadata Response for {batch}:\n---\n{content}\n---"
                 )
@@ -180,6 +190,7 @@ class OpenRouterClientSearch:
                         result = SearchResult(**item)
                         # Mark as non-existent but with generated data
                         result.package_exists = False
+                        result.search_model = response.model_used
                         generated_results[result.name] = result
                     except Exception as e:
                         llm_logger.warning(
@@ -188,11 +199,12 @@ class OpenRouterClientSearch:
 
             except Exception as e:
                 llm_logger.error(
-                    f"Error querying OpenRouter for metadata generation: {e}"
+                    "Error querying OpenRouter for metadata generation: %s",
+                    self.base.format_llm_error(e),
                 )
                 continue
 
-        return generated_results
+        return generated_results, metadata_models_used
 
     def search_packages(self, query: str, limit: int = 20) -> SearchResponse:
         """
@@ -207,9 +219,11 @@ class OpenRouterClientSearch:
             maintaining the original order of relevance.
         """
         # Step 1: Generate a list of candidate package names
-        candidate_names = self._generate_package_name_candidates(query, limit)
+        candidate_names, candidate_model, attempted_models = (
+            self._generate_package_name_candidates(query, limit)
+        )
         if not candidate_names:
-            return SearchResponse()
+            return SearchResponse(info={"query": query, "count": 0}, results=[])
 
         # Step 2: Separate real and fake packages
         real_package_names = []
@@ -225,8 +239,8 @@ class OpenRouterClientSearch:
         )
 
         # Step 3: Generate metadata for the fake packages in batches
-        fake_package_metadata = self._generate_metadata_for_fake_packages(
-            fake_package_names, query
+        fake_package_metadata, metadata_models_used = (
+            self._generate_metadata_for_fake_packages(fake_package_names, query)
         )
 
         # Step 4: Combine results, preserving original order
@@ -242,6 +256,7 @@ class OpenRouterClientSearch:
                     package_exists=True,
                     readme_cached=cache_manager.has_readme_by_name(name),
                     package_cached=cache_manager.has_package_by_name(name),
+                    search_model=candidate_model,
                 )
                 final_results.append(result)
             elif name in fake_package_metadata:
@@ -249,7 +264,14 @@ class OpenRouterClientSearch:
                 final_results.append(fake_package_metadata[name])
 
         return SearchResponse(
-            info={"query": query, "count": len(final_results)}, results=final_results
+            info={
+                "query": query,
+                "count": len(final_results),
+                "model_used": candidate_model,
+                "models_tried": attempted_models,
+                "metadata_models_used": metadata_models_used,
+            },
+            results=final_results,
         )
 
     def _build_metadata_prompt(self, package_names: List[str], query: str) -> str:

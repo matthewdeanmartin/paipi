@@ -106,6 +106,18 @@ class SearchResult(BaseModel):
     package_cached: bool = Field(
         False, description="Whether a generated package ZIP is cached for this package."
     )
+    search_model: Optional[str] = Field(
+        default=None,
+        description="The model used to generate this search result or package suggestion.",
+    )
+    readme_model: Optional[str] = Field(
+        default=None,
+        description="The model used to generate the cached README for this package.",
+    )
+    package_model: Optional[str] = Field(
+        default=None,
+        description="The model used to generate the cached downloadable package.",
+    )
 
 
 class SearchResponse(BaseModel):

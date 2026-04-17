@@ -9,6 +9,9 @@ interface SearchResult {
   package_exists: boolean;
   readme_cached: boolean;   // <-- ADD THIS
   package_cached: boolean;  // <-- ADD THIS
+  search_model?: string | null;
+  readme_model?: string | null;
+  package_model?: string | null;
   description?: string | null;
   summary?: string | null;
   author?: string | null;
@@ -29,14 +32,19 @@ interface SearchResult {
   project_urls?: { [key: string]: string };
 }
 
+interface SearchInfo {
+  query: string;
+  count: number;
+  model_used?: string | null;
+  models_tried?: string[];
+  metadata_models_used?: string[];
+}
+
 /**
  * Represents the top-level response from the search API.
  */
 interface SearchResponse {
-  info: {
-    query: string;
-    count: number;
-  };
+  info: SearchInfo;
   results: SearchResult[];
 }
 
@@ -47,6 +55,8 @@ interface AvailabilityResponse {
   name: string;
   readme_cached: boolean;
   package_cached: boolean;
+  readme_model?: string | null;
+  package_model?: string | null;
 }
 
 /**

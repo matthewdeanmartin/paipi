@@ -50,6 +50,24 @@
             <dd class="col-span-2 text-slate-800">Python {{ package.requires_python }}</dd>
           </div>
         }
+        @if (package.search_model) {
+          <div class="grid grid-cols-3 gap-1">
+            <dt class="text-slate-500">Search model</dt>
+            <dd class="col-span-2 text-slate-800 break-all">{{ package.search_model }}</dd>
+          </div>
+        }
+        @if (readmeModel()) {
+          <div class="grid grid-cols-3 gap-1">
+            <dt class="text-slate-500">README model</dt>
+            <dd class="col-span-2 text-slate-800 break-all">{{ readmeModel() }}</dd>
+          </div>
+        }
+        @if (packageModel()) {
+          <div class="grid grid-cols-3 gap-1">
+            <dt class="text-slate-500">Package model</dt>
+            <dd class="col-span-2 text-slate-800 break-all">{{ packageModel() }}</dd>
+          </div>
+        }
       </dl>
     </div>
     <div>

@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, Optional
 
-from fastapi import Body, FastAPI, HTTPException, Query
+from fastapi import APIRouter, Body, FastAPI, HTTPException, Query, Request
 from fastapi.responses import (
     FileResponse,
     JSONResponse,
@@ -32,14 +32,15 @@ from paipi.main_package_glue import _normalize_model, _zip_dir_to_bytes
 
 from .cache_manager import cache_manager
 from .client_readme import OpenRouterClientReadMe
-from .client_search import OpenRouterClientSearch
-from .config import config
+from .client_search import OpenRouterClientSearch, SearchGenerationError
+from .config import _parse_models, config
 from .models import (
     PackageGenerateRequest,
     ReadmeRequest,
     SearchResponse,
     SearchResult,
 )
+from .openrouter_models import resolve_model_pool
 from .package_cache import CACHE_DB_PATH, package_cache
 from .pypi_scraper import PypiScraper
 
@@ -52,11 +53,21 @@ class AvailabilityResponseItem(BaseModel):
     name: str
     package_cached: bool
     readme_cached: bool
+    package_model: Optional[str] = None
+    readme_model: Optional[str] = None
+
+
+def _optional_model_headers(model_used: Optional[str]) -> Dict[str, str]:
+    """Return response headers carrying model metadata when available."""
+    if not model_used:
+        return {}
+    return {"X-PAIPI-Model-Used": model_used}
 
 
 async def startup_event() -> None:
     """On startup, intelligently load and update the package cache."""
     loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _refresh_runtime_model_pool)
 
     # This helper runs synchronous checks in a thread to not block the event loop
     def check_cache_status() -> str:
@@ -123,10 +134,12 @@ app = FastAPI(
     title=config.app_title,
     description=config.app_description,
     version="0.1.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+    openapi_url="/api/openapi.json",
     lifespan=lifespan,
 )
+api_router = APIRouter(prefix="/api")
 
 
 # --- CORS MIDDLEWARE CONFIGURATION ---
@@ -151,58 +164,85 @@ app.add_middleware(
 
 # --- STATIC FILE SERVING (Angular SPA) ---
 # The built Angular app lives at paipi-app/dist/paipi-app/browser relative to
-# the repo root.  When installed as a package the files are shipped alongside
-# the Python source, so we look for them relative to this file first and fall
-# back to the repo layout.
+# the repo root. When installed as a package the browser assets are copied into
+# paipi/static, so we look for them relative to this file first and fall back
+# to the repo layout.
 _HERE = Path(__file__).parent
 _STATIC_CANDIDATES = [
     _HERE / "static",  # installed package
     _HERE.parent / "paipi-app" / "dist" / "paipi-app" / "browser",  # repo dev
 ]
 _STATIC_DIR: Optional[Path] = next((p for p in _STATIC_CANDIDATES if p.is_dir()), None)
-
-if _STATIC_DIR:
-    app.mount("/app", StaticFiles(directory=str(_STATIC_DIR), html=True), name="static")
-
-    @app.get("/app/{full_path:path}", include_in_schema=False)
-    async def serve_spa(full_path: str) -> FileResponse:  # type: ignore[return]
-        """Serve the Angular SPA index.html for any unmatched /app/* path."""
-        index = _STATIC_DIR / "index.html"  # type: ignore[operator]
-        if index.exists():
-            return FileResponse(str(index))
-        raise HTTPException(status_code=404, detail="UI not found")
+_STATIC_FILES = StaticFiles(directory=str(_STATIC_DIR), html=True) if _STATIC_DIR else None
 
 
 # --- END STATIC FILE SERVING ---
 
-# Initialize OpenRouter client
-config.validate()
-ai_client = OpenRouterClientSearch()
-readme_client = OpenRouterClientReadMe()
+# Initialize OpenRouter clients
+ai_client: Optional[OpenRouterClientSearch] = None
+readme_client: Optional[OpenRouterClientReadMe] = None
+
+
+def _configure_ai_clients() -> None:
+    """Initialize or disable AI clients based on current configuration."""
+    global ai_client, readme_client
+
+    if not config.openrouter_api_key:
+        ai_client = None
+        readme_client = None
+        return
+
+    ai_client = OpenRouterClientSearch()
+    readme_client = OpenRouterClientReadMe()
+
+
+def _refresh_runtime_model_pool() -> None:
+    """Refresh the runtime model pool from live OpenRouter availability."""
+    if not config.openrouter_api_key:
+        return
+
+    resolution = resolve_model_pool(
+        api_key=config.openrouter_api_key,
+        base_url=config.openrouter_base_url,
+        configured_models=config.configured_openrouter_models,
+    )
+    config.set_openrouter_models(resolution.selected_models)
+
+    if resolution.unavailable_configured_models:
+        print(
+            "Skipping unavailable configured model(s): "
+            + ", ".join(resolution.unavailable_configured_models)
+        )
+
+    print("Using OpenRouter model pool: " + ", ".join(config.openrouter_models))
+    _configure_ai_clients()
+
+
+_configure_ai_clients()
 
 pypi_scraper = PypiScraper()
 
 
 # --- CORE ENDPOINTS ---
-@app.get("/")
-async def root() -> Dict[str, Any]:
-    """Root endpoint with basic information."""
+@app.get("/api")
+async def api_root() -> Dict[str, Any]:
+    """API root endpoint with basic information."""
     return {
         "message": "Welcome to PAIPI - AI-Powered PyPI Search",
         "description": "Search for Python packages using AI knowledge",
         "endpoints": [
-            "GET /search?q=<query> - Search for packages",
-            "POST /readme - Generate README.md",
-            "POST /generate_package - Generate package ZIP",
-            "GET /cache/stats - Get cache statistics",
-            "DELETE /cache/clear - Clear cache",
-            "GET /docs - Interactive API documentation",
-            "GET /health - Health check",
+            "GET /api/search?q=<query> - Search for packages",
+            "POST /api/readme - Generate README.md",
+            "POST /api/generate_package - Generate package ZIP",
+            "GET /api/cache/stats - Get cache statistics",
+            "DELETE /api/cache/clear - Clear cache",
+            "GET /api/docs - Interactive API documentation",
+            "GET /api/health - Health check",
         ],
     }
 
 
-@app.get("/health")
+@api_router.get("/health")
 async def health_check() -> Dict[str, Any]:
     """Health check endpoint."""
     cache_stats = cache_manager.get_cache_stats()
@@ -215,7 +255,7 @@ async def health_check() -> Dict[str, Any]:
     }
 
 
-@app.get("/search", response_model=SearchResponse)
+@api_router.get("/search", response_model=SearchResponse)
 async def search_packages(
     q: str = Query(
         "",
@@ -337,6 +377,15 @@ async def search_packages(
                     result.readme_cached = await loop.run_in_executor(
                         None, lambda: cache_manager.has_readme_by_name(result.name)
                     )
+                readme_meta = await loop.run_in_executor(
+                    None, lambda: cache_manager.get_readme_metadata_by_name(result.name)
+                )
+                package_meta = await loop.run_in_executor(
+                    None, lambda: cache_manager.get_package_metadata_by_name(result.name)
+                )
+                result.readme_model = readme_meta.get("model")
+                result.package_model = package_meta.get("model")
+                result.package_cached = bool(package_meta)
 
         # 2. Augment all results concurrently
         if ai_response.results:
@@ -349,6 +398,9 @@ async def search_packages(
         )
         return ai_response
 
+    except SearchGenerationError as e:
+        print(f"Search error: {e}")
+        raise HTTPException(status_code=502, detail=str(e)) from e
     except Exception as e:
         print(f"Search error: {e}")
         raise HTTPException(
@@ -359,7 +411,7 @@ async def search_packages(
 # --- add endpoints in main.py ---
 
 
-@app.post(
+@api_router.post(
     "/readme",
     response_class=PlainTextResponse,
     responses={
@@ -389,7 +441,14 @@ async def generate_readme(req: ReadmeRequest = Body(...)) -> PlainTextResponse:
         )
 
         if cached_readme:
-            return PlainTextResponse(content=cached_readme, media_type="text/markdown")
+            readme_meta = await loop.run_in_executor(
+                None, lambda: cache_manager.get_readme_metadata_by_name(req.name)
+            )
+            return PlainTextResponse(
+                content=cached_readme,
+                media_type="text/markdown",
+                headers=_optional_model_headers(readme_meta.get("model")),
+            )
 
     except Exception as e:
         print(f"Error checking README cache: {e}")
@@ -397,20 +456,21 @@ async def generate_readme(req: ReadmeRequest = Body(...)) -> PlainTextResponse:
     # Generate new README via AI
     try:
         loop = asyncio.get_event_loop()
-        markdown = await loop.run_in_executor(
-            None, lambda: readme_client.generate_readme(req)
-        )
-        markdown = await loop.run_in_executor(
-            None, lambda: readme_client.generate_readme_markdown(req)
+        markdown, model_used = await loop.run_in_executor(
+            None, lambda: readme_client.generate_readme_markdown_with_model(req)
         )
 
         # Cache the results
         await loop.run_in_executor(
-            None, lambda: cache_manager.cache_readme(req, markdown)
+            None, lambda: cache_manager.cache_readme(req, markdown, model_used)
         )
 
         # Return as raw markdown (not JSON) so clients can save directly as README.md
-        return PlainTextResponse(content=markdown, media_type="text/markdown")
+        return PlainTextResponse(
+            content=markdown,
+            media_type="text/markdown",
+            headers=_optional_model_headers(model_used),
+        )
 
     except Exception as e:
         print(f"README generation error: {e}")
@@ -419,7 +479,7 @@ async def generate_readme(req: ReadmeRequest = Body(...)) -> PlainTextResponse:
         ) from e
 
 
-@app.post(
+@api_router.post(
     "/generate_package",
     responses={
         200: {"content": {"application/zip": {}}},
@@ -457,6 +517,9 @@ async def generate_package(
         )
 
         if cached_zip:
+            package_meta = await loop.run_in_executor(
+                None, lambda: cache_manager.get_package_metadata_by_name(package_name)
+            )
             # What was intended here?
             # from io import BytesIO
             # _zip_io = BytesIO(cached_zip)
@@ -464,7 +527,8 @@ async def generate_package(
                 iter([cached_zip]),
                 media_type="application/zip",
                 headers={
-                    "Content-Disposition": f'attachment; filename="{package_name}.zip"'
+                    "Content-Disposition": f'attachment; filename="{package_name}.zip"',
+                    **_optional_model_headers(package_meta.get("model")),
                 },
             )
 
@@ -524,14 +588,15 @@ async def generate_package(
 
         # 4) Cache the bytes by package name (same key you were using)
         await loop.run_in_executor(
-            None, lambda: cache_manager.cache_package(package_name, zip_bytes)
+            None, lambda: cache_manager.cache_package(package_name, zip_bytes, normalized_model)
         )
 
         return StreamingResponse(
             iter([zip_bytes]),
             media_type="application/zip",
             headers={
-                "Content-Disposition": f'attachment; filename="{package_name}.zip"'
+                "Content-Disposition": f'attachment; filename="{package_name}.zip"',
+                **_optional_model_headers(normalized_model),
             },
         )
 
@@ -545,7 +610,7 @@ async def generate_package(
         ) from e
 
 
-@app.get("/cache/stats")
+@api_router.get("/cache/stats")
 async def get_cache_stats() -> Dict[str, Any]:
     """Get cache statistics."""
     try:
@@ -565,7 +630,7 @@ async def get_cache_stats() -> Dict[str, Any]:
         }
 
 
-@app.delete("/cache/clear")
+@api_router.delete("/cache/clear")
 async def clear_cache(
     cache_type: Optional[str] = Query(
         None,
@@ -585,30 +650,34 @@ async def clear_cache(
         return {"status": "error", "message": str(e)}
 
 
-@app.get("/availability")
+@api_router.get("/availability")
 async def availability(
     name: str = Query(..., description="Package name")
 ) -> Dict[str, Any]:
     """Return whether README and package ZIP are already cached for a name."""
     loop = asyncio.get_event_loop()
-    readme_cached, package_cached = await asyncio.gather(
+    readme_cached, package_cached, readme_meta, package_meta = await asyncio.gather(
         loop.run_in_executor(None, lambda: cache_manager.has_readme_by_name(name)),
         loop.run_in_executor(None, lambda: cache_manager.has_package_by_name(name)),
+        loop.run_in_executor(None, lambda: cache_manager.get_readme_metadata_by_name(name)),
+        loop.run_in_executor(None, lambda: cache_manager.get_package_metadata_by_name(name)),
     )
     return {
         "name": name,
         "readme_cached": bool(readme_cached),
         "package_cached": bool(package_cached),
+        "readme_model": readme_meta.get("model"),
+        "package_model": package_meta.get("model"),
     }
 
 
-@app.post("/availability/batch")
+@api_router.post("/availability/batch")
 async def availability_batch(payload: AvailabilityRequest) -> Dict[str, Any]:
     """Batch availability check for multiple names."""
     loop = asyncio.get_event_loop()
     results: list[Dict[str, Any]] = []
     for n in payload.names:
-        readme_cached, package_cached = await asyncio.gather(
+        readme_cached, package_cached, readme_meta, package_meta = await asyncio.gather(
             loop.run_in_executor(
                 None,
                 lambda n=n: cache_manager.has_readme_by_name(n),  # type: ignore[misc]
@@ -617,18 +686,28 @@ async def availability_batch(payload: AvailabilityRequest) -> Dict[str, Any]:
                 None,
                 lambda n=n: cache_manager.has_package_by_name(n),  # type: ignore[misc]
             ),
+            loop.run_in_executor(
+                None,
+                lambda n=n: cache_manager.get_readme_metadata_by_name(n),  # type: ignore[misc]
+            ),
+            loop.run_in_executor(
+                None,
+                lambda n=n: cache_manager.get_package_metadata_by_name(n),  # type: ignore[misc]
+            ),
         )
         results.append(
             {
                 "name": n,
                 "readme_cached": bool(readme_cached),
                 "package_cached": bool(package_cached),
+                "readme_model": readme_meta.get("model"),
+                "package_model": package_meta.get("model"),
             }
         )
     return {"items": results}
 
 
-@app.get(
+@api_router.get(
     "/readme/by-name/{name}",
     response_class=PlainTextResponse,
     responses={
@@ -639,15 +718,20 @@ async def availability_batch(payload: AvailabilityRequest) -> Dict[str, Any]:
 async def get_readme_by_name(name: str) -> PlainTextResponse:
     """Return the most recent cached README for a package name, if present."""
     loop = asyncio.get_event_loop()
-    md = await loop.run_in_executor(
-        None, lambda: cache_manager.get_readme_by_name(name)
+    md, readme_meta = await asyncio.gather(
+        loop.run_in_executor(None, lambda: cache_manager.get_readme_by_name(name)),
+        loop.run_in_executor(None, lambda: cache_manager.get_readme_metadata_by_name(name)),
     )
     if not md:
         raise HTTPException(status_code=404, detail="README not found for this package")
-    return PlainTextResponse(content=md, media_type="text/markdown")
+    return PlainTextResponse(
+        content=md,
+        media_type="text/markdown",
+        headers=_optional_model_headers(readme_meta.get("model")),
+    )
 
 
-@app.get("/search/history")
+@api_router.get("/search/history")
 async def search_history() -> Dict[str, Any]:
     """Return saved past searches with timestamps and result counts."""
     loop = asyncio.get_event_loop()
@@ -655,14 +739,67 @@ async def search_history() -> Dict[str, Any]:
     return {"items": hist}
 
 
+app.include_router(api_router)
+
+
+def _get_spa_index() -> Path:
+    """Return the bundled SPA entrypoint if available."""
+    if not _STATIC_DIR:
+        raise HTTPException(status_code=404, detail="UI not found")
+
+    index = _STATIC_DIR / "index.html"
+    if not index.exists():
+        raise HTTPException(status_code=404, detail="UI not found")
+
+    return index
+
+
+if _STATIC_FILES:
+
+    @app.get("/", include_in_schema=False)
+    async def serve_root() -> FileResponse:
+        """Serve the SPA root page."""
+        return FileResponse(str(_get_spa_index()))
+
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa(full_path: str) -> FileResponse:
+        """Serve static SPA assets and fall back to index.html for client routes."""
+        if full_path.startswith("api"):
+            raise HTTPException(status_code=404, detail="Endpoint not found")
+
+        asset_path = (_STATIC_DIR / full_path).resolve()  # type: ignore[operator]
+        try:
+            asset_path.relative_to(_STATIC_DIR.resolve())  # type: ignore[union-attr]
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="Static asset not found") from exc
+
+        if asset_path.is_file():
+            return FileResponse(str(asset_path))
+
+        if Path(full_path).suffix:
+            raise HTTPException(status_code=404, detail="Static asset not found")
+
+        return FileResponse(str(_get_spa_index()))
+
+
 @app.exception_handler(404)
-async def not_found_handler(_request: Any, _exc: Any) -> JSONResponse:
+async def not_found_handler(request: Request, _exc: Any) -> JSONResponse:
     """Custom 404 handler."""
+    if not request.url.path.startswith("/api"):
+        return JSONResponse(
+            status_code=404,
+            content={
+                "detail": "Page not found",
+                "message": "Try / for the web UI or /api/docs for API documentation",
+            },
+        )
+
     return JSONResponse(
         status_code=404,
         content={
             "detail": "Endpoint not found",
-            "message": "Try /search?q=<query> to search for packages or /docs for API documentation",
+            "message": "Try /api/search?q=<query> to search for packages or /api/docs for API documentation",
         },
     )
 
@@ -675,12 +812,12 @@ def _run_server() -> None:
     port = config.port
     print(f"Starting PAIPI server on {host}:{port}")
     print(f"Debug mode: {config.debug}")
-    print(f"API documentation: http://localhost:{port}/docs")
+    print(f"API documentation: http://localhost:{port}/api/docs")
     print(f"Cache directory: {cache_manager.cache_dir}")
     if _STATIC_DIR:
-        print(f"Web UI: http://localhost:{port}/app")
+        print(f"Web UI: http://localhost:{port}/")
     else:
-        print("Web UI: not found (run 'cd paipi-app && ng build' to build the UI)")
+        print("Web UI: not found (run 'make ui-bundle' to build the UI)")
 
     uvicorn.run(
         "paipi.main:app",
@@ -710,6 +847,14 @@ def start() -> None:
         config.openrouter_api_key = api_key
         os.environ["OPENROUTER_API_KEY"] = api_key
 
+    configured_models = _parse_models(os.environ.get("OPENROUTER_MODELS"))
+    if not configured_models:
+        configured_models = _parse_models(os.environ.get("OPENROUTER_MODEL"))
+    if configured_models:
+        config.configured_openrouter_models = configured_models
+        config.set_openrouter_models(configured_models)
+
+    _configure_ai_clients()
     _run_server()
 
 

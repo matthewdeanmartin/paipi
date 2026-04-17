@@ -12,7 +12,8 @@ endif
 # Default project paths
 PKG          ?= paipi
 TESTS_DIR    ?= test
-APP_DIR      ?= paipi-app   # Angular app location
+# Angular app location
+APP_DIR      ?= paipi-app
 NPM          ?= npm
 NG           ?= npx ng
 
@@ -162,7 +163,8 @@ ui-bundle: app-install
 	cd $(APP_DIR) && $(NPM) run build
 	@echo "Copying build output to paipi/static"
 	rm -rf $(PKG)/static
-	cp -r $(APP_DIR)/dist/paipi-app/browser $(PKG)/static
+	mkdir -p $(PKG)/static
+	cp -r $(APP_DIR)/dist/paipi-app/browser/. $(PKG)/static
 
 # Simple launcher alias
 app: app-install app-start
