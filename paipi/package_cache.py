@@ -15,6 +15,8 @@ from typing import Set
 
 import httpx
 
+from .package_names import canonicalize_package_name
+
 # --- Constants ---
 CACHE_DB_PATH = Path("paipi_cache.db")
 PYPI_SIMPLE_URL = "https://pypi.org/simple/"
@@ -67,7 +69,9 @@ class PackageCache:
                 print("Loading package names from database into memory...")
                 cursor = self._connection.cursor()
                 cursor.execute("SELECT name FROM packages")
-                self._package_names = {row[0] for row in cursor.fetchall()}
+                self._package_names = {
+                    canonicalize_package_name(row[0]) for row in cursor.fetchall()
+                }
                 print(
                     f"Loaded {len(self._package_names)} package names into memory cache."
                 )
@@ -139,8 +143,7 @@ class PackageCache:
         if self._package_names is None:
             self.load_into_memory()
 
-        # PyPI names are normalized to be lowercase with hyphens instead of underscores.
-        normalized_name = package_name.lower().replace("_", "-")
+        normalized_name = canonicalize_package_name(package_name)
 
         return normalized_name in self._package_names if self._package_names else False
 

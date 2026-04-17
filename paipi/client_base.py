@@ -306,6 +306,52 @@ class OpenRouterClientBase:
             llm_logger.error(f"Error during LLM JSON fix attempt: {e}")
             return None
 
+    @staticmethod
+    def _strip_json_fences(content: str) -> str:
+        """Extract the first fenced JSON block when present."""
+        stripped = content.strip()
+        fence_index = stripped.find("```")
+        if fence_index == -1:
+            return stripped
+
+        fenced = stripped[fence_index + 3 :]
+        fenced = fenced.lstrip()
+        if fenced.lower().startswith("json"):
+            fenced = fenced[4:]
+        closing_index = fenced.find("```")
+        if closing_index == -1:
+            return stripped
+        return fenced[:closing_index].strip()
+
+    @staticmethod
+    def _extract_first_json_object(content: str) -> tuple[Optional[str], bool]:
+        """Return the first top-level JSON object and whether another follows it."""
+        decoder = json.JSONDecoder()
+        for index, char in enumerate(content):
+            if char != "{":
+                continue
+            try:
+                parsed, end = decoder.raw_decode(content[index:])
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(parsed, dict):
+                continue
+
+            document = content[index : index + end]
+            remaining = content[index + end :].lstrip()
+            has_multiple_documents = False
+            if remaining.startswith("{"):
+                try:
+                    parsed_remaining, trailing_end = decoder.raw_decode(remaining)
+                    has_multiple_documents = (
+                        isinstance(parsed_remaining, dict) and trailing_end > 0
+                    )
+                except json.JSONDecodeError:
+                    has_multiple_documents = False
+            return document, has_multiple_documents
+
+        return None, False
+
     def parse_and_repair_json(self, content: str) -> Dict[str, Any]:
         """
         A robust method to parse JSON, with multiple repair strategies.
@@ -314,17 +360,19 @@ class OpenRouterClientBase:
             ValueError: If all parsing and repair attempts fail.
         """
         # 1. Clean up common markdown fences
-        s = content.strip()
-        if s.startswith("```json"):
-            s = s.split("```json", 1)[1]
-            if "```" in s:
-                s = s.rsplit("```", 1)[0]
-        elif s.startswith("```"):
-            s = s.split("```", 1)[1]
-            if "```" in s:
-                s = s.rsplit("```", 1)[0]
+        s = self._strip_json_fences(content).strip()
 
-        s = s.strip()
+        first_document, has_multiple_documents = self._extract_first_json_object(s)
+        if first_document is not None:
+            if has_multiple_documents:
+                llm_logger.warning(
+                    "Detected multiple JSON documents in one response; using the first object."
+                )
+            if first_document != s:
+                llm_logger.warning(
+                    "Extracted the first JSON object from mixed-content model output."
+                )
+            return cast(dict[str, Any], json.loads(first_document))
 
         # 2. First attempt: Standard JSON load
         try:
@@ -348,7 +396,17 @@ class OpenRouterClientBase:
         fixed_json_str = self.ask_llm_to_fix_json(s)
         if fixed_json_str:
             try:
-                data = json.loads(fixed_json_str)
+                repaired = self._strip_json_fences(fixed_json_str).strip()
+                first_document, has_multiple_documents = self._extract_first_json_object(
+                    repaired
+                )
+                if first_document is not None:
+                    if has_multiple_documents:
+                        llm_logger.warning(
+                            "Detected multiple JSON documents in repaired output; using the first object."
+                        )
+                    repaired = first_document
+                data = json.loads(repaired)
                 print("Successfully repaired JSON with a one-shot LLM call.")
                 llm_logger.info("Successfully repaired JSON with a one-shot LLM call.")
                 return cast(dict[str, Any], data)

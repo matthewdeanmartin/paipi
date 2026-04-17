@@ -23,6 +23,12 @@ from .config import config
 from .logger import llm_logger
 from .models import SearchResponse, SearchResult
 from .package_cache import package_cache
+from .package_names import (
+    canonicalize_package_name,
+    extract_candidate_package_name,
+    is_pep503_normalized,
+    is_valid_package_name,
+)
 
 
 class SearchGenerationError(RuntimeError):
@@ -65,7 +71,8 @@ class OpenRouterClientSearch:
         Returns:
             A list of unique, cleaned package name strings.
         """
-        found_packages: set[str] = set()
+        found_packages: list[str] = []
+        found_package_names: set[str] = set()
         iteration = 0
         model_used: Optional[str] = None
         attempted_models: list[str] = []
@@ -112,27 +119,51 @@ class OpenRouterClientSearch:
                 attempted_models = response.attempted_models
                 llm_logger.debug(f"RAW LLM Name Response:\n---\n{content}\n---")
 
-                # Add assistant's response to maintain conversation context
-                messages.append({"role": "assistant", "content": content})
-
                 # Process the response
+                accepted_candidates: list[str] = []
                 lines = content.strip().split("\n")
                 for line in lines:
-                    # Clean up the line: remove punctuation, whitespace, list markers
-                    cleaned_name = re.sub(r"^[*\-–—\s\d.]+\s*", "", line.strip())
-                    cleaned_name = re.sub(r"[^\w.-]+", "", cleaned_name)
+                    stripped_line = line.strip()
+                    if not stripped_line:
+                        continue
 
-                    if cleaned_name and len(cleaned_name) > 1:
-                        found_packages.add(cleaned_name)
-                        if len(found_packages) >= limit:
-                            break
+                    candidate_name = extract_candidate_package_name(stripped_line)
+                    if candidate_name is None:
+                        llm_logger.warning(
+                            "Discarding malformed package-name candidate line: %r",
+                            stripped_line[:200],
+                        )
+                        continue
+
+                    if not is_pep503_normalized(candidate_name):
+                        llm_logger.info(
+                            "Candidate package name is not PEP 503-normalized: %s",
+                            candidate_name,
+                        )
+
+                    normalized_name = canonicalize_package_name(candidate_name)
+                    if normalized_name in found_package_names:
+                        continue
+
+                    found_package_names.add(normalized_name)
+                    found_packages.append(candidate_name)
+                    accepted_candidates.append(candidate_name)
+                    if len(found_packages) >= limit:
+                        break
+
+                if accepted_candidates:
+                    messages.append({"role": "assistant", "content": content})
+                else:
+                    llm_logger.warning(
+                        "Ignoring malformed name-generation response that produced no valid package names."
+                    )
 
             except Exception as e:
                 message = self.base.format_llm_error(e)
                 llm_logger.error(f"Error during package name generation: {message}")
                 raise SearchGenerationError(message) from e
 
-        return list(found_packages)[:limit], model_used, attempted_models
+        return found_packages[:limit], model_used, attempted_models
 
     def _generate_metadata_for_fake_packages(
         self, package_names: List[str], query: str, batch_size: int = 3
@@ -151,10 +182,13 @@ class OpenRouterClientSearch:
         if not package_names:
             return {}, []
 
-        generated_results = {}
+        generated_results: Dict[str, SearchResult] = {}
         metadata_models_used: list[str] = []
         for i in range(0, len(package_names), batch_size):
             batch = package_names[i : i + batch_size]
+            requested_by_normalized = {
+                canonicalize_package_name(name): name for name in batch
+            }
             llm_logger.info(f"Generating metadata for fake packages batch: {batch}")
 
             prompt = self._build_metadata_prompt(batch, query)
@@ -185,13 +219,71 @@ class OpenRouterClientSearch:
                     continue
 
                 data = self.base.parse_and_repair_json(content)
-                for item in data.get("results", []):
+                results = data.get("results", [])
+                if not isinstance(results, list):
+                    llm_logger.warning(
+                        "Metadata response did not contain a list under 'results': %r",
+                        data,
+                    )
+                    continue
+
+                for item in results:
                     try:
-                        result = SearchResult(**item)
+                        if not isinstance(item, dict):
+                            llm_logger.warning(
+                                "Discarding malformed metadata item that is not an object: %r",
+                                item,
+                            )
+                            continue
+
+                        raw_name = item.get("name")
+                        if not isinstance(raw_name, str) or not is_valid_package_name(
+                            raw_name
+                        ):
+                            llm_logger.warning(
+                                "Discarding metadata item with invalid package name: %r",
+                                item,
+                            )
+                            continue
+
+                        if not is_pep503_normalized(raw_name):
+                            llm_logger.info(
+                                "Metadata package name is not PEP 503-normalized: %s",
+                                raw_name,
+                            )
+
+                        normalized_name = canonicalize_package_name(raw_name)
+                        requested_name = requested_by_normalized.get(normalized_name)
+                        if requested_name is None:
+                            llm_logger.warning(
+                                "Discarding metadata item for unexpected package name %r; expected one of %r",
+                                raw_name,
+                                batch,
+                            )
+                            continue
+
+                        if raw_name != requested_name:
+                            llm_logger.warning(
+                                "Discarding metadata item because package name %r did not exactly match requested name %r",
+                                raw_name,
+                                requested_name,
+                            )
+                            continue
+
+                        if requested_name in generated_results:
+                            llm_logger.warning(
+                                "Discarding duplicate metadata item for package %s",
+                                requested_name,
+                            )
+                            continue
+
+                        normalized_item = dict(item)
+                        normalized_item["name"] = requested_name
+                        result = SearchResult(**normalized_item)
                         # Mark as non-existent but with generated data
                         result.package_exists = False
                         result.search_model = response.model_used
-                        generated_results[result.name] = result
+                        generated_results[requested_name] = result
                     except Exception as e:
                         llm_logger.warning(
                             f"Error parsing generated metadata item: {e}\nItem: {item}"

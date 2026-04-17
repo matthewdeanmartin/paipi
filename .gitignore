@@ -211,3 +211,4 @@ paipi_cache.db
 /logs/
 .idea
 junit.xml
+/paipi/static/

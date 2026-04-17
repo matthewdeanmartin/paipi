@@ -21,11 +21,13 @@ def package_cache(tmp_path: Path):
 def test_package_exists_normalizes_name(package_cache):
     cursor = package_cache._connection.cursor()
     cursor.execute("INSERT INTO packages (name) VALUES (?)", ("django-rest-framework",))
+    cursor.execute("INSERT INTO packages (name) VALUES (?)", ("zope-interface",))
     package_cache._connection.commit()
 
     package_cache.load_into_memory()
 
     assert package_cache.package_exists("Django_REST_Framework") is True
+    assert package_cache.package_exists("zope.interface") is True
     assert package_cache.package_exists("missing-package") is False
 
 

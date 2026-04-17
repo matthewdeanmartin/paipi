@@ -39,6 +39,20 @@ def test_parse_and_repair_json_markdown(client):
     assert result == {"key": "value"}
 
 
+def test_parse_and_repair_json_uses_first_document_from_multi_doc_response(client):
+    content = """
+    Here are the requested objects:
+
+    ```json
+    {"key": "value"}
+
+    {"key": "later"}
+    ```
+    """
+    result = client.parse_and_repair_json(content)
+    assert result == {"key": "value"}
+
+
 @patch("untruncate_json.complete")
 def test_parse_and_repair_json_untruncate(mock_untruncate, client):
     mock_untruncate.return_value = '{"key": "value"}'
