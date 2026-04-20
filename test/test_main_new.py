@@ -1,14 +1,11 @@
 import pytest
-import os
-import json
-from pathlib import Path
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import patch, AsyncMock
 from fastapi.testclient import TestClient
 
 # Mocking before importing app to avoid unwanted side effects
 with patch("paipi.cache_manager.CacheManager._init_db"), \
      patch("paipi.package_cache.PackageCache._init_db"):
-    from paipi.main import app, config
+    from paipi.main import app
 
 from paipi.client_search import SearchGenerationError
 from paipi.models import SearchResult, SearchResponse
@@ -20,7 +17,7 @@ def client(tmp_path):
     test_cache_dir.mkdir()
     (test_cache_dir / "packages").mkdir()
     
-    test_db_path = test_cache_dir / "cache.db"
+    test_cache_dir / "cache.db"
     test_package_db_path = tmp_path / "paipi_cache.db"
 
     with patch("paipi.main.cache_manager") as mock_cm, \
