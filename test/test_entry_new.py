@@ -1,5 +1,3 @@
-import sys
-import pytest
 from unittest.mock import patch
 from paipi.__main__ import _entry
 

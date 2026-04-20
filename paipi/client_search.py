@@ -12,7 +12,6 @@ This version implements a new workflow:
 
 from __future__ import annotations
 
-import re
 from typing import Dict, List, Optional
 
 from openai import OpenAI
