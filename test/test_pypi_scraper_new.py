@@ -2,7 +2,7 @@ import pytest
 import httpx
 from unittest.mock import AsyncMock, patch, MagicMock
 from paipi.pypi_scraper import PypiScraper
-from paipi.models import ProjectDetails, PackageRelease, PackageFile
+from paipi.models import ProjectDetails, PackageFile
 
 @pytest.fixture
 def scraper():
