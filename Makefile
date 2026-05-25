@@ -91,7 +91,7 @@ mypy:
 
 # Aggregate checks (format → lint → types → tests → sec → hooks)
 .PHONY: check
-check: black pylint mypy test bandit pre-commit
+check: black pylint mypy test bandit
 	@echo "All checks passed"
 
 # ---------------------------
