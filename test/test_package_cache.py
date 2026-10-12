@@ -62,7 +62,7 @@ def test_update_cache_downloads_and_loads_package_names(
             assert timeout == 120.0
             return FakeResponse()
 
-    monkeypatch.setattr(package_cache_module.httpx, "Client", FakeClient)
+    monkeypatch.setattr(package_cache_module.httpx2, "Client", FakeClient)
 
     package_cache.update_cache()
 

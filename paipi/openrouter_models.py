@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-import httpx
+import httpx2
 
 
 FALLBACK_ROUTER_MODEL = "openrouter/free"
@@ -119,7 +119,7 @@ def fetch_models(
     timeout: float = 30.0,
 ) -> list[dict[str, Any]]:
     """Fetch the currently available OpenRouter model catalog."""
-    with httpx.Client(timeout=timeout) as client:
+    with httpx2.Client(timeout=timeout) as client:
         response = client.get(
             _models_url(base_url),
             headers={"Authorization": f"Bearer {api_key}"},

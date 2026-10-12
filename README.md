@@ -160,3 +160,10 @@ make check
 
 MIT.
 
+
+
+## HTTPX2 migration verification (2026-10-04)
+
+Direct PyPI/OpenRouter HTTP clients and mocks use HTTPX2. Fifteen isolated client/cache/model tests pass on RC3 pre and 3.14; complete app remains blocked by source-only untruncate-json. This is client evidence, not full app installation readiness.
+
+Dependency locks upgraded and checked. Published dependency wheels only; no native builds or GitHub jobs. Application HTTPX2 objects remain separate from third-party HTTPX objects. Current HTTPX2 releases use the OS trust store. Experimental RC3 tests may require Pydantic prerelease wheels; stable support is reported separately. Changes local; human operators decide releases and upstream reports.

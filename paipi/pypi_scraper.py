@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional, cast
 
-import httpx
+import httpx2
 from pydantic import ValidationError
 
 from .models import (
@@ -60,7 +60,7 @@ class PypiScraper:
                 f"Fetching metadata for '{package_name}'"
                 f"{' version ' + version if version else ' (latest)'}..."
             )
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            async with httpx2.AsyncClient(timeout=self.timeout) as client:
                 response = await client.get(url)
                 if response.status_code == 404:
                     scraper_logger.warning(
@@ -71,12 +71,12 @@ class PypiScraper:
                 response.raise_for_status()
                 return cast(Dict[str, Any], response.json())
 
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             scraper_logger.error(
                 f"HTTP error fetching '{package_name}': {e.response.status_code} - {e}"
             )
             return None
-        except httpx.RequestError as e:
+        except httpx2.RequestError as e:
             scraper_logger.error(f"Network error fetching '{package_name}': {e}")
             return None
         except ValueError as e:

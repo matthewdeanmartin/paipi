@@ -1,5 +1,5 @@
 import pytest
-import httpx
+import httpx2
 from unittest.mock import AsyncMock, patch, MagicMock
 from paipi.pypi_scraper import PypiScraper
 from paipi.models import ProjectDetails, PackageFile
@@ -23,7 +23,7 @@ async def test_get_project_metadata_success(scraper):
         "releases": {"1.0.0": []}
     }
     
-    with patch("httpx.AsyncClient.get") as mock_get:
+    with patch("httpx2.AsyncClient.get") as mock_get:
         mock_get.return_value = MagicMock(
             status_code=200,
             json=lambda: mock_response,
@@ -37,13 +37,13 @@ async def test_get_project_metadata_success(scraper):
             raise_for_status=lambda: None
         )
         
-        # Actually, httpx.AsyncClient.get is an async method
+        # Actually, httpx2.AsyncClient.get is an async method
         mock_get.return_value = MagicMock()
         mock_get.side_effect = None
         mock_get.return_value = MagicMock()
         
-        # Better way to mock httpx AsyncClient
-        with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_get:
+        # Better way to mock httpx2 AsyncClient
+        with patch("httpx2.AsyncClient.get", new_callable=AsyncMock) as mock_get:
             mock_get.return_value = MagicMock(
                 status_code=200,
                 json=lambda: mock_response,
@@ -55,7 +55,7 @@ async def test_get_project_metadata_success(scraper):
 
 @pytest.mark.anyio
 async def test_get_project_metadata_404(scraper):
-    with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_get:
+    with patch("httpx2.AsyncClient.get", new_callable=AsyncMock) as mock_get:
         mock_get.return_value = MagicMock(
             status_code=404,
             raise_for_status=lambda: None
@@ -66,9 +66,9 @@ async def test_get_project_metadata_404(scraper):
 
 @pytest.mark.anyio
 async def test_get_project_metadata_http_error(scraper):
-    with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_get:
+    with patch("httpx2.AsyncClient.get", new_callable=AsyncMock) as mock_get:
         mock_resp = MagicMock(status_code=500)
-        mock_resp.raise_for_status.side_effect = httpx.HTTPStatusError("Error", request=MagicMock(), response=mock_resp)
+        mock_resp.raise_for_status.side_effect = httpx2.HTTPStatusError("Error", request=MagicMock(), response=mock_resp)
         mock_get.return_value = mock_resp
         
         result = await scraper.get_project_metadata("error-pkg")

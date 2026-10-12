@@ -13,7 +13,7 @@ import sqlite3
 from pathlib import Path
 from typing import Set
 
-import httpx
+import httpx2
 
 from .package_names import canonicalize_package_name
 
@@ -103,7 +103,7 @@ class PackageCache:
 
         print("Starting PyPI package list update from server...")
         try:
-            with httpx.Client() as client:
+            with httpx2.Client() as client:
                 response = client.get(PYPI_SIMPLE_URL, timeout=120.0)
                 response.raise_for_status()
 
@@ -129,7 +129,7 @@ class PackageCache:
             self._package_names = None  # Force reload on next check
             self.load_into_memory()  # Refresh in-memory set
 
-        except httpx.RequestError as e:
+        except httpx2.RequestError as e:
             print(f"HTTP error while fetching package list: {e}")
         except sqlite3.Error as e:
             print(f"Database error during cache update: {e}")

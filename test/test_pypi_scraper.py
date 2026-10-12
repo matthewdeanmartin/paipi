@@ -15,11 +15,11 @@ class FakeResponse:
     def __init__(self, url: str, status_code: int, payload: dict):
         self.status_code = status_code
         self._payload = payload
-        self.request = pypi_scraper_module.httpx.Request("GET", url)
+        self.request = pypi_scraper_module.httpx2.Request("GET", url)
 
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
-            raise pypi_scraper_module.httpx.HTTPStatusError(
+            raise pypi_scraper_module.httpx2.HTTPStatusError(
                 "request failed", request=self.request, response=self
             )
 
@@ -55,7 +55,7 @@ async def test_get_project_metadata_accepts_unknown_top_level_fields(
         "urls": [],
     }
     monkeypatch.setattr(
-        pypi_scraper_module.httpx,
+        pypi_scraper_module.httpx2,
         "AsyncClient",
         lambda timeout: FakeAsyncClient(FakeResponse(url, 200, payload)),
     )
@@ -73,7 +73,7 @@ async def test_get_project_metadata_returns_none_for_404(
     scraper = PypiScraper()
     url = scraper._build_metadata_url("missing-package")
     monkeypatch.setattr(
-        pypi_scraper_module.httpx,
+        pypi_scraper_module.httpx2,
         "AsyncClient",
         lambda timeout: FakeAsyncClient(FakeResponse(url, 404, {})),
     )
@@ -103,7 +103,7 @@ async def test_get_all_releases_reads_upload_time_from_pypi_json_response(
         "urls": [],
     }
     monkeypatch.setattr(
-        pypi_scraper_module.httpx,
+        pypi_scraper_module.httpx2,
         "AsyncClient",
         lambda timeout: FakeAsyncClient(FakeResponse(url, 200, payload)),
     )

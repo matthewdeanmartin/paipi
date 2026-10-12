@@ -30,7 +30,7 @@ dependencies = [
     "pydantic>=2.0.0",
     "python-dotenv>=1.0.0",
     "untruncate_json",
-    "httpx>=0.25.0",
+    "httpx2>=2.0,<3",
     "pypi_json",
     "keyring>=24.0.0",
 ]
