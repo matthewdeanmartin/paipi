@@ -50,7 +50,9 @@ def test_generate_package_name_candidates_retries_after_garbage_response(client)
         mock_config.default_model = "google/gemma-4-31b-it:free"
         mock_config.openrouter_models = ["google/gemma-4-31b-it:free"]
         mock_config.rotate_models = False
-        candidates, _, _ = client._generate_package_name_candidates("test query", limit=2)
+        candidates, _, _ = client._generate_package_name_candidates(
+            "test query", limit=2
+        )
 
     assert candidates == ["cx_Freeze", "pygame"]
 
@@ -58,9 +60,7 @@ def test_generate_package_name_candidates_retries_after_garbage_response(client)
 def test_generate_metadata_for_fake_packages(client):
     mock_response = MagicMock()
     mock_response.model = "anthropic/claude-3.5-sonnet"
-    mock_response.choices[
-        0
-    ].message.content = """
+    mock_response.choices[0].message.content = """
     {
         "results": [
             {
@@ -87,9 +87,7 @@ def test_generate_metadata_for_fake_packages(client):
 def test_generate_metadata_rejects_name_mismatches(client):
     mock_response = MagicMock()
     mock_response.model = "anthropic/claude-3.5-sonnet"
-    mock_response.choices[
-        0
-    ].message.content = """
+    mock_response.choices[0].message.content = """
     {
         "results": [
             {
@@ -111,7 +109,7 @@ def test_generate_metadata_rejects_name_mismatches(client):
 
 
 def test_search_packages_full_flow(client, test_caches):
-    cm, pc = test_caches
+    _cm, pc = test_caches
 
     # Setup package cache: pkg1 is real, pkg2 is fake
     cursor = pc._connection.cursor()
@@ -127,9 +125,7 @@ def test_search_packages_full_flow(client, test_caches):
     # Mock metadata generation for fake packages
     mock_resp_meta = MagicMock()
     mock_resp_meta.model = "anthropic/claude-3.5-sonnet"
-    mock_resp_meta.choices[
-        0
-    ].message.content = """
+    mock_resp_meta.choices[0].message.content = """
     {
         "results": [
             {

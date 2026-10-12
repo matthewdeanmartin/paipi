@@ -10,7 +10,7 @@ import sqlite3
 import zipfile
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, cast
 
 from pydantic import ValidationError
 
@@ -29,7 +29,7 @@ class CacheManager:
         self.packages_dir = self.cache_dir / "packages"
         self.packages_dir.mkdir(exist_ok=True)
 
-        self._connection: Optional[sqlite3.Connection] = None
+        self._connection: sqlite3.Connection | None = None
         self._init_db()
 
     def _init_db(self) -> None:
@@ -39,8 +39,7 @@ class CacheManager:
             cursor = self._connection.cursor()
 
             # Table for search results cache
-            cursor.execute(
-                """
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS search_cache
                 (
                     query_key
@@ -60,12 +59,10 @@ class CacheManager:
                     DEFAULT
                     CURRENT_TIMESTAMP
                 )
-                """
-            )
+                """)
 
             # Table for README cache
-            cursor.execute(
-                """
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS readme_cache
                 (
                     request_hash
@@ -85,12 +82,10 @@ class CacheManager:
                     DEFAULT
                     CURRENT_TIMESTAMP
                 )
-                """
-            )
+                """)
 
             # Table for package cache
-            cursor.execute(
-                """
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS package_cache
                 (
                     package_name
@@ -110,11 +105,12 @@ class CacheManager:
                     DEFAULT
                     CURRENT_TIMESTAMP
                 )
-                """
-            )
+                """)
 
             self._ensure_column("readme_cache", "readme_model", "TEXT")
-            self._ensure_column("package_cache", "package_model", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(
+                "package_cache", "package_model", "TEXT NOT NULL DEFAULT ''"
+            )
 
             self._connection.commit()
             print(f"Cache database initialized at {self.db_path}")
@@ -156,7 +152,7 @@ class CacheManager:
 
     # Search results caching
 
-    def get_cached_search(self, query: str) -> Optional[SearchResponse]:
+    def get_cached_search(self, query: str) -> SearchResponse | None:
         """Get cached search results for a query."""
         if not self._connection:
             return None
@@ -206,7 +202,7 @@ class CacheManager:
         except (sqlite3.Error, json.JSONDecodeError) as e:
             print(f"Error caching search results: {e}")
 
-    def get_all_cached_searches(self) -> List[SearchResponse]:
+    def get_all_cached_searches(self) -> list[SearchResponse]:
         """Get all cached search results for empty/blank queries."""
         if not self._connection:
             return []
@@ -236,7 +232,7 @@ class CacheManager:
 
     # README caching
 
-    def get_cached_readme(self, request: ReadmeRequest) -> Optional[str]:
+    def get_cached_readme(self, request: ReadmeRequest) -> str | None:
         """Get cached README for a request."""
         if not self._connection:
             return None
@@ -252,7 +248,7 @@ class CacheManager:
             result = cursor.fetchone()
 
             if result:
-                return cast(Optional[str], result[0])
+                return cast(str | None, result[0])
 
         except sqlite3.Error as e:
             print(f"Error retrieving cached README: {e}")
@@ -263,7 +259,7 @@ class CacheManager:
         self,
         request: ReadmeRequest,
         markdown_content: str,
-        model_used: Optional[str] = None,
+        model_used: str | None = None,
     ) -> None:
         """Cache README markdown content and save to file."""
         if not self._connection:
@@ -314,7 +310,7 @@ class CacheManager:
             print(f"Error checking README by name: {e}")
             return False
 
-    def get_readme_by_name(self, package_name: str) -> Optional[str]:
+    def get_readme_by_name(self, package_name: str) -> str | None:
         """Return the most recent README markdown by package name, if present."""
         if not self._connection:
             return None
@@ -336,7 +332,7 @@ class CacheManager:
             print(f"Error fetching README by name: {e}")
             return None
 
-    def get_readme_metadata_by_name(self, package_name: str) -> Dict[str, Any]:
+    def get_readme_metadata_by_name(self, package_name: str) -> dict[str, Any]:
         """Return metadata for the most recent cached README by package name."""
         if not self._connection:
             return {}
@@ -359,20 +355,18 @@ class CacheManager:
             print(f"Error fetching README metadata by name: {e}")
             return {}
 
-    def list_readme_packages(self) -> List[Dict[str, Any]]:
+    def list_readme_packages(self) -> list[dict[str, Any]]:
         """Return list of packages for which we have cached READMEs."""
         if not self._connection:
             return []
         try:
             c = self._connection.cursor()
-            c.execute(
-                """
+            c.execute("""
                 SELECT package_name, MAX(datetime(created_at)) as latest
                 FROM readme_cache
                 GROUP BY package_name
                 ORDER BY latest DESC
-                """
-            )
+                """)
             rows = c.fetchall()
             return [{"package_name": r[0], "latest": r[1]} for r in rows]
         except sqlite3.Error as e:
@@ -381,7 +375,7 @@ class CacheManager:
 
     # Package caching
 
-    def get_cached_package(self, package_name: str) -> Optional[bytes]:
+    def get_cached_package(self, package_name: str) -> bytes | None:
         """Get cached package ZIP bytes."""
         if not self._connection:
             return None
@@ -429,21 +423,19 @@ class CacheManager:
             return False
 
     # --- Search history ---
-    def get_search_history(self) -> List[Dict[str, Any]]:
+    def get_search_history(self) -> list[dict[str, Any]]:
         """Return list of prior searches with created_at and lightweight counts."""
         if not self._connection:
             return []
         try:
             c = self._connection.cursor()
-            c.execute(
-                """
+            c.execute("""
                 SELECT original_query, results_json, created_at
                 FROM search_cache
                 ORDER BY datetime(created_at) DESC
-                """
-            )
+                """)
             rows = c.fetchall()
-            out: List[Dict[str, Any]] = []
+            out: list[dict[str, Any]] = []
             for q, res_json, ts in rows:
                 count = 0
                 try:
@@ -458,7 +450,7 @@ class CacheManager:
             return []
 
     def cache_package(
-        self, package_name: str, zip_bytes: bytes, model_used: Optional[str] = None
+        self, package_name: str, zip_bytes: bytes, model_used: str | None = None
     ) -> None:
         """Cache package ZIP bytes to file and database."""
         if not self._connection:
@@ -489,7 +481,7 @@ class CacheManager:
         except (sqlite3.Error, OSError) as e:
             print(f"Error caching package: {e}")
 
-    def get_package_metadata_by_name(self, package_name: str) -> Dict[str, Any]:
+    def get_package_metadata_by_name(self, package_name: str) -> dict[str, Any]:
         """Return metadata for a cached package ZIP by package name."""
         if not self._connection:
             return {}
@@ -513,7 +505,7 @@ class CacheManager:
             return {}
 
     def generate_stub_package(
-        self, package_name: str, metadata: Optional[Dict[str, Any]] = None
+        self, package_name: str, metadata: dict[str, Any] | None = None
     ) -> bytes:
         """Generate a stub package ZIP with basic structure."""
         if metadata is None:
@@ -533,13 +525,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "{package_name}"
-version = "{metadata.get('version', '0.1.0')}"
-description = "{metadata.get('description', f'A Python package named {package_name}')}"
+version = "{metadata.get("version", "0.1.0")}"
+description = "{metadata.get("description", f"A Python package named {package_name}")}"
 authors = [
-    {{name = "{metadata.get('author', 'Unknown')}", email = "{metadata.get('author_email', 'unknown@example.com')}"}}
+    {{name = "{metadata.get("author", "Unknown")}", email = "{metadata.get("author_email", "unknown@example.com")}"}}
 ]
-license = {{text = "{metadata.get('license', 'MIT')}"}}
-requires-python = "{metadata.get('python_requires', '>=3.8')}"
+license = {{text = "{metadata.get("license", "MIT")}"}}
+requires-python = "{metadata.get("python_requires", ">=3.8")}"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -553,15 +545,15 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "{metadata.get('homepage', f'https://github.com/user/{package_name}')}"
-Repository = "{metadata.get('repository', f'https://github.com/user/{package_name}')}"
+Homepage = "{metadata.get("homepage", f"https://github.com/user/{package_name}")}"
+Repository = "{metadata.get("repository", f"https://github.com/user/{package_name}")}"
 """
             zipf.writestr("pyproject.toml", pyproject_content)
 
             # README.md
             readme_content = f"""# {package_name}
 
-{metadata.get('description', f'A Python package named {package_name}')}
+{metadata.get("description", f"A Python package named {package_name}")}
 
 ## Installation
 
@@ -579,18 +571,18 @@ import {safe_name}
 
 ## License
 
-{metadata.get('license', 'MIT')}
+{metadata.get("license", "MIT")}
 """
             zipf.writestr("README.md", readme_content)
 
             # Package __init__.py
             init_content = f'''"""
-{package_name} - {metadata.get('description', f'A Python package named {package_name}')}
+{package_name} - {metadata.get("description", f"A Python package named {package_name}")}
 """
 
-__version__ = "{metadata.get('version', '0.1.0')}"
-__author__ = "{metadata.get('author', 'Unknown')}"
-__email__ = "{metadata.get('author_email', 'unknown@example.com')}"
+__version__ = "{metadata.get("version", "0.1.0")}"
+__author__ = "{metadata.get("author", "Unknown")}"
+__email__ = "{metadata.get("author_email", "unknown@example.com")}"
 
 # Your package code here
 def hello():
@@ -610,7 +602,7 @@ recursive-include src *
             if not metadata.get("license_text"):
                 license_content = f"""MIT License
 
-Copyright (c) 2024 {metadata.get('author', 'Unknown')}
+Copyright (c) 2024 {metadata.get("author", "Unknown")}
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -639,7 +631,7 @@ SOFTWARE.
 
         return zip_bytes
 
-    def clear_cache(self, cache_type: Optional[str] = None) -> None:
+    def clear_cache(self, cache_type: str | None = None) -> None:
         """Clear cache entries. If cache_type is None, clears all caches."""
         if not self._connection:
             return
@@ -662,7 +654,7 @@ SOFTWARE.
         except sqlite3.Error as e:
             print(f"Error clearing cache: {e}")
 
-    def get_cache_stats(self) -> Dict[str, int]:
+    def get_cache_stats(self) -> dict[str, int]:
         """Get cache statistics."""
         if not self._connection:
             return {"search": 0, "readme": 0, "package": 0}

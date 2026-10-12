@@ -7,9 +7,10 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, AsyncIterator, Dict, Optional
+from typing import Any
 
 from fastapi import APIRouter, Body, FastAPI, HTTPException, Query, Request
 from fastapi.responses import (
@@ -53,11 +54,11 @@ class AvailabilityResponseItem(BaseModel):
     name: str
     package_cached: bool
     readme_cached: bool
-    package_model: Optional[str] = None
-    readme_model: Optional[str] = None
+    package_model: str | None = None
+    readme_model: str | None = None
 
 
-def _optional_model_headers(model_used: Optional[str]) -> Dict[str, str]:
+def _optional_model_headers(model_used: str | None) -> dict[str, str]:
     """Return response headers carrying model metadata when available."""
     if not model_used:
         return {}
@@ -172,15 +173,17 @@ _STATIC_CANDIDATES = [
     _HERE / "static",  # installed package
     _HERE.parent / "paipi-app" / "dist" / "paipi-app" / "browser",  # repo dev
 ]
-_STATIC_DIR: Optional[Path] = next((p for p in _STATIC_CANDIDATES if p.is_dir()), None)
-_STATIC_FILES = StaticFiles(directory=str(_STATIC_DIR), html=True) if _STATIC_DIR else None
+_STATIC_DIR: Path | None = next((p for p in _STATIC_CANDIDATES if p.is_dir()), None)
+_STATIC_FILES = (
+    StaticFiles(directory=str(_STATIC_DIR), html=True) if _STATIC_DIR else None
+)
 
 
 # --- END STATIC FILE SERVING ---
 
 # Initialize OpenRouter clients
-ai_client: Optional[OpenRouterClientSearch] = None
-readme_client: Optional[OpenRouterClientReadMe] = None
+ai_client: OpenRouterClientSearch | None = None
+readme_client: OpenRouterClientReadMe | None = None
 
 
 def _configure_ai_clients() -> None:
@@ -225,7 +228,7 @@ pypi_scraper = PypiScraper()
 
 # --- CORE ENDPOINTS ---
 @app.get("/api")
-async def api_root() -> Dict[str, Any]:
+async def api_root() -> dict[str, Any]:
     """API root endpoint with basic information."""
     return {
         "message": "Welcome to PAIPI - AI-Powered PyPI Search",
@@ -243,7 +246,7 @@ async def api_root() -> Dict[str, Any]:
 
 
 @api_router.get("/health")
-async def health_check() -> Dict[str, Any]:
+async def health_check() -> dict[str, Any]:
     """Health check endpoint."""
     cache_stats = cache_manager.get_cache_stats()
     return {
@@ -261,7 +264,7 @@ async def search_packages(
         "",
         description="Search query for Python packages (empty for all cached results)",
     ),
-    size: Optional[int] = Query(
+    size: int | None = Query(
         20, description="Number of results to return", ge=1, le=100
     ),
 ) -> SearchResponse:
@@ -381,7 +384,8 @@ async def search_packages(
                     None, lambda: cache_manager.get_readme_metadata_by_name(result.name)
                 )
                 package_meta = await loop.run_in_executor(
-                    None, lambda: cache_manager.get_package_metadata_by_name(result.name)
+                    None,
+                    lambda: cache_manager.get_package_metadata_by_name(result.name),
                 )
                 result.readme_model = readme_meta.get("model")
                 result.package_model = package_meta.get("model")
@@ -588,7 +592,10 @@ async def generate_package(
 
         # 4) Cache the bytes by package name (same key you were using)
         await loop.run_in_executor(
-            None, lambda: cache_manager.cache_package(package_name, zip_bytes, normalized_model)
+            None,
+            lambda: cache_manager.cache_package(
+                package_name, zip_bytes, normalized_model
+            ),
         )
 
         return StreamingResponse(
@@ -611,7 +618,7 @@ async def generate_package(
 
 
 @api_router.get("/cache/stats")
-async def get_cache_stats() -> Dict[str, Any]:
+async def get_cache_stats() -> dict[str, Any]:
     """Get cache statistics."""
     try:
         loop = asyncio.get_event_loop()
@@ -632,11 +639,11 @@ async def get_cache_stats() -> Dict[str, Any]:
 
 @api_router.delete("/cache/clear")
 async def clear_cache(
-    cache_type: Optional[str] = Query(
+    cache_type: str | None = Query(
         None,
         description="Type of cache to clear: 'search', 'readme', 'package', or None for all",
-    )
-) -> Dict[str, str]:
+    ),
+) -> dict[str, str]:
     """Clear cache entries."""
     try:
         loop = asyncio.get_event_loop()
@@ -652,15 +659,19 @@ async def clear_cache(
 
 @api_router.get("/availability")
 async def availability(
-    name: str = Query(..., description="Package name")
-) -> Dict[str, Any]:
+    name: str = Query(..., description="Package name"),
+) -> dict[str, Any]:
     """Return whether README and package ZIP are already cached for a name."""
     loop = asyncio.get_event_loop()
     readme_cached, package_cached, readme_meta, package_meta = await asyncio.gather(
         loop.run_in_executor(None, lambda: cache_manager.has_readme_by_name(name)),
         loop.run_in_executor(None, lambda: cache_manager.has_package_by_name(name)),
-        loop.run_in_executor(None, lambda: cache_manager.get_readme_metadata_by_name(name)),
-        loop.run_in_executor(None, lambda: cache_manager.get_package_metadata_by_name(name)),
+        loop.run_in_executor(
+            None, lambda: cache_manager.get_readme_metadata_by_name(name)
+        ),
+        loop.run_in_executor(
+            None, lambda: cache_manager.get_package_metadata_by_name(name)
+        ),
     )
     return {
         "name": name,
@@ -672,10 +683,10 @@ async def availability(
 
 
 @api_router.post("/availability/batch")
-async def availability_batch(payload: AvailabilityRequest) -> Dict[str, Any]:
+async def availability_batch(payload: AvailabilityRequest) -> dict[str, Any]:
     """Batch availability check for multiple names."""
     loop = asyncio.get_event_loop()
-    results: list[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
     for n in payload.names:
         readme_cached, package_cached, readme_meta, package_meta = await asyncio.gather(
             loop.run_in_executor(
@@ -720,7 +731,9 @@ async def get_readme_by_name(name: str) -> PlainTextResponse:
     loop = asyncio.get_event_loop()
     md, readme_meta = await asyncio.gather(
         loop.run_in_executor(None, lambda: cache_manager.get_readme_by_name(name)),
-        loop.run_in_executor(None, lambda: cache_manager.get_readme_metadata_by_name(name)),
+        loop.run_in_executor(
+            None, lambda: cache_manager.get_readme_metadata_by_name(name)
+        ),
     )
     if not md:
         raise HTTPException(status_code=404, detail="README not found for this package")
@@ -732,7 +745,7 @@ async def get_readme_by_name(name: str) -> PlainTextResponse:
 
 
 @api_router.get("/search/history")
-async def search_history() -> Dict[str, Any]:
+async def search_history() -> dict[str, Any]:
     """Return saved past searches with timestamps and result counts."""
     loop = asyncio.get_event_loop()
     hist = await loop.run_in_executor(None, cache_manager.get_search_history)
@@ -761,7 +774,6 @@ if _STATIC_FILES:
         """Serve the SPA root page."""
         return FileResponse(str(_get_spa_index()))
 
-
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(full_path: str) -> FileResponse:
         """Serve static SPA assets and fall back to index.html for client routes."""
@@ -772,7 +784,9 @@ if _STATIC_FILES:
         try:
             asset_path.relative_to(_STATIC_DIR.resolve())  # type: ignore[union-attr]
         except ValueError as exc:
-            raise HTTPException(status_code=404, detail="Static asset not found") from exc
+            raise HTTPException(
+                status_code=404, detail="Static asset not found"
+            ) from exc
 
         if asset_path.is_file():
             return FileResponse(str(asset_path))

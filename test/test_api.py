@@ -11,11 +11,12 @@ from paipi.models import SearchResponse, SearchResult
 def client(test_caches):
     # Mock the package_cache methods that are called in the startup event
     # to avoid real network calls or background thread issues.
-    with patch("paipi.main.package_cache.load_into_memory"), patch(
-        "paipi.main.package_cache.update_cache"
+    with (
+        patch("paipi.main.package_cache.load_into_memory"),
+        patch("paipi.main.package_cache.update_cache"),
+        TestClient(app) as c,
     ):
-        with TestClient(app) as c:
-            yield c
+        yield c
 
 
 def test_root_endpoint(client):

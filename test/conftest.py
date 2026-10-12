@@ -1,3 +1,5 @@
+import contextlib
+
 import pytest
 
 from paipi.cache_manager import CacheManager
@@ -23,14 +25,10 @@ def test_caches(tmp_path, monkeypatch):
         "paipi.cache_manager",
         "paipi.package_cache",
     ]:
-        try:
+        with contextlib.suppress(AttributeError):
             monkeypatch.setattr(f"{module}.cache_manager", test_cm)
-        except AttributeError:
-            pass
-        try:
+        with contextlib.suppress(AttributeError):
             monkeypatch.setattr(f"{module}.package_cache", test_pc)
-        except AttributeError:
-            pass
 
     try:
         yield test_cm, test_pc

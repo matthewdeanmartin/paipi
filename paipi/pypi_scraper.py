@@ -5,7 +5,7 @@ PyPI Scraper client for fetching package metadata from the official JSON API.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, cast
 
 import httpx2
 from pydantic import ValidationError
@@ -33,17 +33,15 @@ class PypiScraper:
         self.base_url = "https://pypi.org/pypi"
         self.timeout = 30.0
 
-    def _build_metadata_url(
-        self, package_name: str, version: Optional[str] = None
-    ) -> str:
+    def _build_metadata_url(self, package_name: str, version: str | None = None) -> str:
         """Build the PyPI JSON API URL for a package/version request."""
         if version is None:
             return f"{self.base_url}/{package_name}/json"
         return f"{self.base_url}/{package_name}/{version}/json"
 
     async def get_project_metadata(
-        self, package_name: str, version: Optional[str] = None
-    ) -> Optional[Dict[str, Any]]:
+        self, package_name: str, version: str | None = None
+    ) -> dict[str, Any] | None:
         """
         Fetches the raw JSON metadata for a package from PyPI.
 
@@ -69,7 +67,7 @@ class PypiScraper:
                     )
                     return None
                 response.raise_for_status()
-                return cast(Dict[str, Any], response.json())
+                return cast(dict[str, Any], response.json())
 
         except httpx2.HTTPStatusError as e:
             scraper_logger.error(
@@ -91,7 +89,7 @@ class PypiScraper:
             )
             return None
 
-    async def get_project_details(self, package_name: str) -> Optional[ProjectDetails]:
+    async def get_project_details(self, package_name: str) -> ProjectDetails | None:
         """
         Fetches detailed information for the latest version of a package.
 
@@ -133,7 +131,7 @@ class PypiScraper:
             )
             return None
 
-    async def get_project_readme(self, package_name: str) -> Optional[str]:
+    async def get_project_readme(self, package_name: str) -> str | None:
         """
         Fetches only the project's long description (README).
 
@@ -148,10 +146,10 @@ class PypiScraper:
         """
         metadata = await self.get_project_metadata(package_name)
         if metadata and "info" in metadata:
-            return cast(Optional[str], metadata["info"].get("description"))
+            return cast(str | None, metadata["info"].get("description"))
         return None
 
-    async def get_all_releases(self, package_name: str) -> List[PackageRelease]:
+    async def get_all_releases(self, package_name: str) -> list[PackageRelease]:
         """
         Gets a list of all releases for a given package.
 
@@ -187,7 +185,7 @@ class PypiScraper:
 
     async def get_release_files(
         self, package_name: str, version: str = "latest"
-    ) -> List[PackageFile]:
+    ) -> list[PackageFile]:
         """
         Gets all package files for a specific version of a package.
 

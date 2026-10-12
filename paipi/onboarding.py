@@ -21,7 +21,7 @@ from .openrouter_models import (
 
 _OPENROUTER_URL = "https://openrouter.ai/keys"
 
-_BANNER = """
+_BANNER = f"""
 ╔══════════════════════════════════════════════════════════════╗
 ║          Welcome to PAIPI - AI-Powered PyPI Search           ║
 ╚══════════════════════════════════════════════════════════════╝
@@ -29,13 +29,11 @@ _BANNER = """
 PAIPI uses OpenRouter to access large language models that power
 the AI package search. You'll need a free OpenRouter API key.
 
-  Get one at: {url}
+  Get one at: {_OPENROUTER_URL}
 
 Your key will be stored securely in your system keyring (not in
 any file) and will be used automatically on future runs.
-""".format(
-    url=_OPENROUTER_URL
-)
+"""
 
 _SEPARATOR = "─" * 64
 
@@ -53,7 +51,9 @@ def prompt_for_models(api_key: str) -> list[str]:
         suggested_models = shortlisted_model_ids(shortlist)
     except Exception as exc:
         print(f"\n  Could not fetch OpenRouter's current model list ({exc}).")
-        print(f"  Falling back to {FALLBACK_ROUTER_MODEL} unless you enter models manually.")
+        print(
+            f"  Falling back to {FALLBACK_ROUTER_MODEL} unless you enter models manually."
+        )
 
     default_display = ", ".join(suggested_models)
     while True:
@@ -61,7 +61,7 @@ def prompt_for_models(api_key: str) -> list[str]:
             raw = input(
                 f"\n  Preferred model IDs (comma separated, blank for {default_display}): "
             ).strip()
-        except (KeyboardInterrupt, EOFError):
+        except KeyboardInterrupt, EOFError:
             print("\n\nUsing the suggested model list.")
             return suggested_models
 
@@ -69,7 +69,9 @@ def prompt_for_models(api_key: str) -> list[str]:
         if chosen_models:
             return chosen_models
 
-        print("  Please enter at least one model ID, or press Enter to accept the suggestion.\n")
+        print(
+            "  Please enter at least one model ID, or press Enter to accept the suggestion.\n"
+        )
 
 
 def run_onboarding() -> str:
@@ -88,7 +90,7 @@ def run_onboarding() -> str:
             key = input(
                 "  Paste your OpenRouter API key (starts with sk-or-): "
             ).strip()
-        except (KeyboardInterrupt, EOFError):
+        except KeyboardInterrupt, EOFError:
             print(
                 "\n\nSetup cancelled. Run `paipi start` again when you have your key."
             )
@@ -123,7 +125,9 @@ def run_onboarding() -> str:
             print(f"\n  Saved preferred model pool: {', '.join(saved_models)}")
         except Exception as exc:
             print(f"\n  Warning: could not save model preferences to .env ({exc}).")
-            print("  You can set OPENROUTER_MODEL / OPENROUTER_MODELS manually instead.")
+            print(
+                "  You can set OPENROUTER_MODEL / OPENROUTER_MODELS manually instead."
+            )
 
         print(_SEPARATOR)
         return key

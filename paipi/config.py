@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Optional
 
 from dotenv import load_dotenv
 
@@ -19,7 +18,7 @@ KEYRING_SERVICE = "paipi"
 KEYRING_USERNAME = "openrouter_api_key"
 
 
-def _load_api_key() -> Optional[str]:
+def _load_api_key() -> str | None:
     """Load the OpenRouter API key from env var or keyring (env takes priority)."""
     env_key = os.getenv("OPENROUTER_API_KEY")
     if env_key:
@@ -39,7 +38,7 @@ def save_api_key(key: str) -> None:
     keyring.set_password(KEYRING_SERVICE, KEYRING_USERNAME, key)
 
 
-def _parse_models(value: Optional[str]) -> list[str]:
+def _parse_models(value: str | None) -> list[str]:
     """Parse a comma/newline separated model list."""
     if not value:
         return []
@@ -61,7 +60,9 @@ def save_model_preferences(
         deduped = [FALLBACK_ROUTER_MODEL]
 
     path = Path(env_path)
-    existing_lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    existing_lines = (
+        path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    )
 
     def upsert(lines: list[str], key: str, value: str) -> list[str]:
         new_line = f"{key}={value}"
@@ -91,7 +92,7 @@ class Config:
 
     def __init__(self) -> None:
         """Initialize configuration from environment variables."""
-        self.openrouter_api_key: Optional[str] = _load_api_key()
+        self.openrouter_api_key: str | None = _load_api_key()
         self.openrouter_base_url: str = os.getenv(
             "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"
         )

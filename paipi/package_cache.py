@@ -11,7 +11,6 @@ from __future__ import annotations
 import re
 import sqlite3
 from pathlib import Path
-from typing import Set
 
 import httpx2
 
@@ -28,7 +27,7 @@ class PackageCache:
     _instance = None
     _db_path: Path
     _connection: sqlite3.Connection | None = None
-    _package_names: Set[str] | None = None
+    _package_names: set[str] | None = None
 
     def __new__(cls, db_path: Path = CACHE_DB_PATH) -> PackageCache:
         if cls._instance is None:
@@ -43,8 +42,7 @@ class PackageCache:
             # check_same_thread=False is safe for this read-heavy, single-writer use case
             self._connection = sqlite3.connect(self._db_path, check_same_thread=False)
             cursor = self._connection.cursor()
-            cursor.execute(
-                """
+            cursor.execute("""
                            CREATE TABLE IF NOT EXISTS packages
                            (
                                name
@@ -52,8 +50,7 @@ class PackageCache:
                                PRIMARY
                                KEY
                            )
-                           """
-            )
+                           """)
             self._connection.commit()
             print(f"Cache database initialized at {self._db_path}")
         except sqlite3.Error as e:

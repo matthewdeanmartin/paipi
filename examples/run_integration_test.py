@@ -27,6 +27,7 @@ From the root of the 'paipi' project directory, run:
   $ export OPENAI_API_KEY="your-key"
   $ python3 examples/run_integration_test.py
 """
+
 import json
 import logging
 import os
@@ -34,7 +35,6 @@ import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
-
 from paipi.generate_package import (
     DockerOpenInterpreter,
     GenerationConfig,
@@ -118,7 +118,8 @@ print(f"The 10th Fibonacci number is {num}")
 
 # Get the sequence up to the 10th number
 seq = fibonacci_calculator.get_sequence(10)
-print(f"The sequence is: {seq}")""", )
+print(f"The sequence is: {seq}")""",
+        )
         log.info(f"Test library spec created for '{spec.name}'")
         if not config.openai_api_key:
             log.error("FATAL: OPENAI_API_KEY environment variable is not set.")
@@ -129,7 +130,9 @@ print(f"The sequence is: {seq}")""", )
         interpreter = DockerOpenInterpreter(config)
 
         log.info("-" * 60)
-        log.info(f"Calling generate_library for '{spec.name}'. This will take a few minutes...")
+        log.info(
+            f"Calling generate_library for '{spec.name}'. This will take a few minutes..."
+        )
         log.info("Watch for [CONTAINER] logs below.")
         log.info("-" * 60)
 
@@ -166,7 +169,7 @@ print(f"The sequence is: {seq}")""", )
         with summary_path.open("r") as f:
             summary_data = json.load(f)
         assert (
-                summary_data["library_name"] == spec.name
+            summary_data["library_name"] == spec.name
         ), "Library name in summary should match spec"
         log.info("  - generation_summary.json contains correct library name.")
 
@@ -174,14 +177,14 @@ print(f"The sequence is: {seq}")""", )
         log.info("🎉 TEST PASSED! All assertions met. 🎉")
         log.info("=" * 60)
 
-    except Exception as e:
+    except Exception:
         log.error("=" * 60)
-        log.error(f"❌ TEST FAILED: An error occurred: {e}", exc_info=True)
+        log.exception("❌ TEST FAILED: An error occurred")
         log.error("=" * 60)
         sys.exit(1)
 
     finally:
-        print ("done")
+        print("done")
         # # --- 5. Cleanup ---
         # log.info("Performing cleanup...")
         # # if test_run_dir.exists():
@@ -189,5 +192,6 @@ print(f"The sequence is: {seq}")""", )
         # #     log.info(f"Removed temporary test directory: {test_run_dir}")
         # log.info("Cleanup complete.")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

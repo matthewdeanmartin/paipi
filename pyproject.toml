@@ -135,3 +135,6 @@ schema_version = "current"
 [[tool.changelogmanager.components]]
 name = "default"
 changelog = "CHANGELOG.md"
+
+[tool.ruff.lint]
+ignore = ["RUF100", "B008", "BLE001", "C414", "PERF402", "PYI034", "RUF012", "S110", "SIM103", "SIM117"]  # unused noqa differs across Python versions

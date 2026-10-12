@@ -13,7 +13,6 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import List, Optional
 
 # Import from the main evaluation module
 from pypi_bench.main import (
@@ -25,7 +24,7 @@ from pypi_bench.main import (
 )
 
 
-def load_config(config_path: Optional[str] = None) -> Config:
+def load_config(config_path: str | None = None) -> Config:
     """Load configuration from file or use defaults."""
     config = Config()
 
@@ -34,25 +33,23 @@ def load_config(config_path: Optional[str] = None) -> Config:
             config_data = json.load(f)
 
         # Update config with loaded values
-        if 'openrouter_api_key' in config_data:
-            config.openrouter_api_key = config_data['openrouter_api_key']
+        if "openrouter_api_key" in config_data:
+            config.openrouter_api_key = config_data["openrouter_api_key"]
 
-        if 'evaluation_settings' in config_data:
-            settings = config_data['evaluation_settings']
-            if 'test_package_count' in settings:
-                config.test_package_count = settings['test_package_count']
-            if 'max_concurrent_requests' in settings:
-                config.max_concurrent_requests = settings['max_concurrent_requests']
-            if 'request_timeout' in settings:
-                config.request_timeout = settings['request_timeout']
+        if "evaluation_settings" in config_data:
+            settings = config_data["evaluation_settings"]
+            if "test_package_count" in settings:
+                config.test_package_count = settings["test_package_count"]
+            if "max_concurrent_requests" in settings:
+                config.max_concurrent_requests = settings["max_concurrent_requests"]
+            if "request_timeout" in settings:
+                config.request_timeout = settings["request_timeout"]
 
     return config
 
 
 async def run_quick_evaluation(
-        models: List[str],
-        topics: List[str] = None,
-        config: Optional[Config] = None
+    models: list[str], topics: list[str] | None = None, config: Config | None = None
 ) -> None:
     """Run a quick evaluation with specified parameters."""
     if config is None:
@@ -79,19 +76,25 @@ async def run_quick_evaluation(
     # Run mixed package evaluation
     logger.info("Running mixed package evaluation...")
     mixed_test_cases = test_generator.generate_mixed_test(config.test_package_count)
-    mixed_results = await evaluation_engine.run_mixed_package_evaluation(models, mixed_test_cases)
+    mixed_results = await evaluation_engine.run_mixed_package_evaluation(
+        models, mixed_test_cases
+    )
     all_results.extend(mixed_results)
 
     # Run topic evaluations
     for topic in topics:
         logger.info(f"Running topic evaluation for: {topic}")
-        topic_results = await evaluation_engine.run_topic_generation_evaluation(models, topic, all_packages)
+        topic_results = await evaluation_engine.run_topic_generation_evaluation(
+            models, topic, all_packages
+        )
         all_results.extend(topic_results)
 
     # Run fake detection
     logger.info("Running fake package detection...")
     fake_packages = test_generator.generate_fake_test(config.test_package_count)
-    fake_results = await evaluation_engine.run_fake_detection_evaluation(models, fake_packages)
+    fake_results = await evaluation_engine.run_fake_detection_evaluation(
+        models, fake_packages
+    )
     all_results.extend(fake_results)
 
     # Analyze results
@@ -109,8 +112,8 @@ async def run_quick_evaluation(
 
     # Group by model and show average performance
     for model in models:
-        model_results = summary_df[summary_df['model'] == model]
-        avg_success = model_results['success_rate'].mean()
+        model_results = summary_df[summary_df["model"] == model]
+        avg_success = model_results["success_rate"].mean()
         print(f"\n{model}: {avg_success:.2%} average success rate")
 
         for _, row in model_results.iterrows():
@@ -125,41 +128,37 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="LLM Package Knowledge Evaluator")
 
     parser.add_argument(
-        '--config', '-c',
-        type=str,
-        help="Path to configuration JSON file"
+        "--config", "-c", type=str, help="Path to configuration JSON file"
     )
 
     parser.add_argument(
-        '--models', '-m',
-        nargs='+',
+        "--models",
+        "-m",
+        nargs="+",
         default=["openai/gpt-4o-mini", "anthropic/claude-3.5-sonnet"],
-        help="Models to evaluate"
+        help="Models to evaluate",
     )
 
     parser.add_argument(
-        '--topics', '-t',
-        nargs='+',
+        "--topics",
+        "-t",
+        nargs="+",
         default=["web"],
-        help="Topics for generation evaluation"
+        help="Topics for generation evaluation",
     )
 
     parser.add_argument(
-        '--api-key',
-        type=str,
-        help="OpenRouter API key (overrides config file)"
+        "--api-key", type=str, help="OpenRouter API key (overrides config file)"
     )
 
     parser.add_argument(
-        '--quick',
-        action='store_true',
-        help="Run a quick evaluation with fewer packages"
+        "--quick",
+        action="store_true",
+        help="Run a quick evaluation with fewer packages",
     )
 
     parser.add_argument(
-        '--verbose', '-v',
-        action='store_true',
-        help="Enable verbose logging"
+        "--verbose", "-v", action="store_true", help="Enable verbose logging"
     )
 
     args = parser.parse_args()
@@ -167,8 +166,7 @@ def main() -> None:
     # Setup logging
     log_level = logging.DEBUG if args.verbose else logging.INFO
     logging.basicConfig(
-        level=log_level,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        level=log_level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
 
     # Load configuration
@@ -183,7 +181,10 @@ def main() -> None:
         config.max_concurrent_requests = 3
 
     # Validate API key
-    if not config.openrouter_api_key or config.openrouter_api_key == "your-openrouter-api-key-here":
+    if (
+        not config.openrouter_api_key
+        or config.openrouter_api_key == "your-openrouter-api-key-here"
+    ):
         print("ERROR: Please set your OpenRouter API key!")
         print("Either use --api-key or set it in the config file.")
         sys.exit(1)

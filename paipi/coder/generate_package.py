@@ -16,7 +16,7 @@ import tempfile
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from jinja2 import ChoiceLoader, Environment, FileSystemLoader, StrictUndefined
 
@@ -33,9 +33,9 @@ class GenerationConfig:
 
     python_version: str = "3.11"
     cache_folder: str = "./cache"
-    container_name: Optional[str] = None
+    container_name: str | None = None
     timeout_seconds: int = 3600  # 1 hour default timeout
-    openai_api_key: Optional[str] = None
+    openai_api_key: str | None = None
     model: str = "gpt-4"
     max_retries: int = 3
 
@@ -48,7 +48,7 @@ class LibrarySpec:
     python_version: str
     pypi_description: str
     readme_content: str
-    additional_requirements: List[str] | None = None
+    additional_requirements: list[str] | None = None
 
     def __post_init__(self) -> None:
         if self.additional_requirements is None:
@@ -190,7 +190,7 @@ CMD ["python", "-c", "import interpreter; print('Open Interpreter ready')"]
             self.logger.error(f"Failed to build container: {e.stderr}")
             raise RuntimeError(f"Docker build failed: {e.stderr}") from e
 
-    def _run_container(self, work_dir: Path) -> Dict[str, Any]:
+    def _run_container(self, work_dir: Path) -> dict[str, Any]:
         """Run the container and capture output"""
         output_dir = self.cache_path / f"output_{int(time.time())}"
         output_dir.mkdir(exist_ok=True)
@@ -205,21 +205,21 @@ CMD ["python", "-c", "import interpreter; print('Open Interpreter ready')"]
             env_vars.extend(["-e", f"OPENAI_API_KEY={self.config.openai_api_key}"])
         env_vars.extend(["-e", f"MODEL={self.config.model}"])
 
-        run_cmd = (
-            [
-                "docker",
-                "run",
-                "--rm",
-                "--name",
-                f"{self.container_name}_run",
-                "-v",
-                f"{output_dir}:/output",
-                "-v",
-                f"{work_dir / 'generate_library.py'}:/workspace/generate_library.py",
-            ]
-            + env_vars
-            + [self.container_name, "python", "/workspace/generate_library.py"]
-        )
+        run_cmd = [
+            "docker",
+            "run",
+            "--rm",
+            "--name",
+            f"{self.container_name}_run",
+            "-v",
+            f"{output_dir}:/output",
+            "-v",
+            f"{work_dir / 'generate_library.py'}:/workspace/generate_library.py",
+            *env_vars,
+            self.container_name,
+            "python",
+            "/workspace/generate_library.py",
+        ]
 
         try:
             self.logger.info("Starting container execution...")
@@ -234,7 +234,6 @@ CMD ["python", "-c", "import interpreter; print('Open Interpreter ready')"]
                     universal_newlines=True,
                     encoding="utf-8",
                 ) as process:
-
                     # Stream output in real-time
                     if process.stdout:
                         for line in process.stdout:
@@ -282,7 +281,7 @@ CMD ["python", "-c", "import interpreter; print('Open Interpreter ready')"]
 
             raise RuntimeError(f"Container execution failed: {error_info}") from e
 
-    def generate_library(self, spec: LibrarySpec) -> Dict[str, Any]:
+    def generate_library(self, spec: LibrarySpec) -> dict[str, Any]:
         """
         Generate a Python library using Open Interpreter in Docker
 
@@ -333,7 +332,7 @@ CMD ["python", "-c", "import interpreter; print('Open Interpreter ready')"]
 
                 raise
 
-    def list_generated_libraries(self) -> List[Dict[str, Any]]:
+    def list_generated_libraries(self) -> list[dict[str, Any]]:
         """List all generated libraries in the cache"""
         libraries = []
 
@@ -362,7 +361,7 @@ CMD ["python", "-c", "import interpreter; print('Open Interpreter ready')"]
                         shutil.rmtree(output_dir)
                         removed_count += 1
                         self.logger.info(f"Removed old cache directory: {output_dir}")
-                except (ValueError, IndexError):
+                except ValueError, IndexError:
                     # Skip directories that don't match the expected naming pattern
                     pass
 

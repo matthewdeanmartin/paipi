@@ -2,7 +2,6 @@
 import io
 import zipfile
 from pathlib import Path
-from typing import Dict
 
 # NEW: import the generator bits
 
@@ -17,7 +16,7 @@ def _normalize_model(user_model: str | None) -> str:
 
     m = user_model.strip().lower().replace("_", "-")
 
-    MODEL_MAP: Dict[str, str] = {
+    MODEL_MAP: dict[str, str] = {
         # OpenAI "frontier"
         "gpt-5": "gpt-5",  # if enabled for your key
         "gpt-4.1": "gpt-4.1",

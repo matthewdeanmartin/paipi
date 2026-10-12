@@ -5,7 +5,7 @@ Pydantic models for PyPI-shaped API responses with type hints.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -15,32 +15,32 @@ class ProjectInfo(BaseModel):
 
     name: str
     version: str
-    description: Optional[str] = None
+    description: str | None = None
 
 
 class ProjectUrls(BaseModel):
     """Project URLs."""
 
-    homepage: Optional[str] = None
-    repository: Optional[str] = None
-    documentation: Optional[str] = None
-    download: Optional[str] = None
+    homepage: str | None = None
+    repository: str | None = None
+    documentation: str | None = None
+    download: str | None = None
 
 
 class ProjectDetails(BaseModel):
     """Detailed project information."""
 
-    author: Optional[str] = None
-    author_email: Optional[str] = None
-    maintainer: Optional[str] = None
-    maintainer_email: Optional[str] = None
-    license: Optional[str] = None
-    keywords: Optional[str] = None
-    classifiers: List[str] = Field(default_factory=list)
-    requires_python: Optional[str] = None
-    project_urls: Optional[ProjectUrls] = None
-    summary: Optional[str] = None
-    platform: Optional[str] = None
+    author: str | None = None
+    author_email: str | None = None
+    maintainer: str | None = None
+    maintainer_email: str | None = None
+    license: str | None = None
+    keywords: str | None = None
+    classifiers: list[str] = Field(default_factory=list)
+    requires_python: str | None = None
+    project_urls: ProjectUrls | None = None
+    summary: str | None = None
+    platform: str | None = None
 
 
 class PackageRelease(BaseModel):
@@ -48,8 +48,8 @@ class PackageRelease(BaseModel):
 
     version: str
     yanked: bool = False
-    yanked_reason: Optional[str] = None
-    upload_time: Optional[datetime] = None
+    yanked_reason: str | None = None
+    upload_time: datetime | None = None
 
 
 class PackageFile(BaseModel):
@@ -57,12 +57,12 @@ class PackageFile(BaseModel):
 
     filename: str
     url: str
-    hashes: Dict[str, str] = Field(default_factory=dict)
-    requires_python: Optional[str] = None
+    hashes: dict[str, str] = Field(default_factory=dict)
+    requires_python: str | None = None
     yanked: bool = False
-    yanked_reason: Optional[str] = None
-    upload_time: Optional[datetime] = None
-    size: Optional[int] = None
+    yanked_reason: str | None = None
+    upload_time: datetime | None = None
+    size: int | None = None
     packagetype: str = "sdist"  # sdist, bdist_wheel, etc.
 
 
@@ -72,29 +72,29 @@ class SearchResult(BaseModel):
     name: str
     version: str
     # Use Field to provide a distinct description for this field in OpenAPI docs
-    summary: Optional[str] = Field(
+    summary: str | None = Field(
         default=None, description="The short, one-line summary of the package."
     )
-    description: Optional[str] = Field(
+    description: str | None = Field(
         default=None,
         description="The long description of the package, typically the README content.",
     )
-    author: Optional[str] = None
-    author_email: Optional[str] = None
-    maintainer: Optional[str] = None
-    maintainer_email: Optional[str] = None
-    home_page: Optional[str] = None
-    package_url: Optional[str] = None
-    release_url: Optional[str] = None
-    docs_url: Optional[str] = None
-    download_url: Optional[str] = None
-    bugtrack_url: Optional[str] = None
-    keywords: Optional[str] = None
-    license: Optional[str] = None
-    classifiers: List[str] = Field(default_factory=list)
-    platform: Optional[str] = None
-    requires_python: Optional[str] = None
-    project_urls: Dict[str, str] = Field(default_factory=dict)
+    author: str | None = None
+    author_email: str | None = None
+    maintainer: str | None = None
+    maintainer_email: str | None = None
+    home_page: str | None = None
+    package_url: str | None = None
+    release_url: str | None = None
+    docs_url: str | None = None
+    download_url: str | None = None
+    bugtrack_url: str | None = None
+    keywords: str | None = None
+    license: str | None = None
+    classifiers: list[str] = Field(default_factory=list)
+    platform: str | None = None
+    requires_python: str | None = None
+    project_urls: dict[str, str] = Field(default_factory=dict)
     package_exists: bool = Field(
         False,
         description="Whether the package name exists on PyPI according to the local cache.",
@@ -106,15 +106,15 @@ class SearchResult(BaseModel):
     package_cached: bool = Field(
         False, description="Whether a generated package ZIP is cached for this package."
     )
-    search_model: Optional[str] = Field(
+    search_model: str | None = Field(
         default=None,
         description="The model used to generate this search result or package suggestion.",
     )
-    readme_model: Optional[str] = Field(
+    readme_model: str | None = Field(
         default=None,
         description="The model used to generate the cached README for this package.",
     )
-    package_model: Optional[str] = Field(
+    package_model: str | None = Field(
         default=None,
         description="The model used to generate the cached downloadable package.",
     )
@@ -123,8 +123,8 @@ class SearchResult(BaseModel):
 class SearchResponse(BaseModel):
     """PyPI search API response format."""
 
-    info: Dict[str, Any] = Field(default_factory=dict)
-    results: List[SearchResult] = Field(default_factory=list)
+    info: dict[str, Any] = Field(default_factory=dict)
+    results: list[SearchResult] = Field(default_factory=list)
     model_config = ConfigDict(json_encoders={datetime: lambda v: v.isoformat()})
 
 
@@ -132,19 +132,19 @@ class ReadmeRequest(BaseModel):
     """Input metadata to draft a README."""
 
     name: str = Field(..., description="Project/package name")
-    summary: Optional[str] = Field(None, description="One-line summary / tagline")
-    description: Optional[str] = Field(None, description="Longer description")
-    license: Optional[str] = None
-    repo_url: Optional[str] = None
-    homepage: Optional[str] = None
-    documentation_url: Optional[str] = None
-    install_cmd: Optional[str] = Field(None, description="e.g., pip install yourpkg")
-    python_requires: Optional[str] = None
-    features: Optional[List[str]] = None
-    usage_snippets: Optional[List[str]] = Field(
+    summary: str | None = Field(None, description="One-line summary / tagline")
+    description: str | None = Field(None, description="Longer description")
+    license: str | None = None
+    repo_url: str | None = None
+    homepage: str | None = None
+    documentation_url: str | None = None
+    install_cmd: str | None = Field(None, description="e.g., pip install yourpkg")
+    python_requires: str | None = None
+    features: list[str] | None = None
+    usage_snippets: list[str] | None = Field(
         default=None, description="Code examples as raw code strings"
     )
-    extras: Optional[Dict[str, Any]] = Field(
+    extras: dict[str, Any] | None = Field(
         default=None, description="Any additional metadata you want to pass through"
     )
 
@@ -159,7 +159,7 @@ class PackageGenerateRequest(BaseModel):
     """Stub: payload that will be sent to LLM to generate a package."""
 
     readme_markdown: str
-    metadata: Dict[str, Any] = Field(
+    metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Everything needed to assemble a package (name, version, pyproject, module skeleton, etc.)",
     )

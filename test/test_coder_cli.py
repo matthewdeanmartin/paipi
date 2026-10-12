@@ -1,6 +1,5 @@
 from unittest.mock import MagicMock, patch
 
-
 from paipi.coder.cli import main
 
 

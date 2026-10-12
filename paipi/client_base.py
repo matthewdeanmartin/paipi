@@ -7,10 +7,10 @@ Handles structured formats and simple retry workflows.
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from threading import Lock
-import time
-from typing import Any, Dict, Optional, cast
+from typing import Any, cast
 
 import untruncate_json
 from openai import OpenAI
@@ -37,9 +37,7 @@ class OpenRouterClientBase:
     _temporarily_disabled_models: dict[str, float] = {}
     _permanently_disabled_models: set[str] = set()
 
-    def __init__(
-        self, api_key: Optional[str] = None, base_url: Optional[str] = None
-    ) -> None:
+    def __init__(self, api_key: str | None = None, base_url: str | None = None) -> None:
         """Initialize the OpenRouter client."""
         self.api_key = api_key or config.openrouter_api_key
         self.base_url = base_url or config.openrouter_base_url
@@ -81,7 +79,7 @@ class OpenRouterClientBase:
         return message or exc.__class__.__name__
 
     @staticmethod
-    def _status_code_from_error(exc: Exception) -> Optional[int]:
+    def _status_code_from_error(exc: Exception) -> int | None:
         status_code = getattr(exc, "status_code", None)
         if isinstance(status_code, int):
             return status_code
@@ -127,7 +125,7 @@ class OpenRouterClientBase:
             cls._temporarily_disabled_models[model] = max(existing, unix_timestamp)
 
     @staticmethod
-    def _rate_limit_reset_from_error(exc: Exception) -> Optional[float]:
+    def _rate_limit_reset_from_error(exc: Exception) -> float | None:
         body = getattr(exc, "body", None)
         if not isinstance(body, dict):
             return None
@@ -147,7 +145,7 @@ class OpenRouterClientBase:
         reset_value = headers.get("X-RateLimit-Reset")
         try:
             reset = float(reset_value)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
 
         if reset > 10_000_000_000:
@@ -168,8 +166,10 @@ class OpenRouterClientBase:
             self._disable_model_until(model, reset_at)
             llm_logger.info("Cooling down rate-limited model %s", model)
 
-    def _model_candidates(self, preferred_model: Optional[str] = None) -> list[str]:
-        configured_models = list(getattr(config, "openrouter_models", [config.default_model]))
+    def _model_candidates(self, preferred_model: str | None = None) -> list[str]:
+        configured_models = list(
+            getattr(config, "openrouter_models", [config.default_model])
+        )
         if not configured_models:
             configured_models = [config.default_model]
 
@@ -230,12 +230,12 @@ class OpenRouterClientBase:
         messages: list[dict[str, str]],
         temperature: float,
         max_tokens: int,
-        preferred_model: Optional[str] = None,
+        preferred_model: str | None = None,
     ) -> ChatCompletionResult:
         """Create a chat completion with model rotation and fallback."""
         attempted_models: list[str] = []
         candidates = self._model_candidates(preferred_model)
-        last_exc: Optional[Exception] = None
+        last_exc: Exception | None = None
 
         for index, model in enumerate(candidates):
             attempted_models.append(model)
@@ -248,7 +248,9 @@ class OpenRouterClientBase:
                 )
                 content = response.choices[0].message.content or ""
                 raw_model = getattr(response, "model", None)
-                model_used = raw_model if isinstance(raw_model, str) and raw_model else model
+                model_used = (
+                    raw_model if isinstance(raw_model, str) and raw_model else model
+                )
                 if index > 0:
                     llm_logger.info(
                         "Fell back to model %s after failures in %s",
@@ -278,7 +280,7 @@ class OpenRouterClientBase:
     # -----------------
     # Robust JSON repair helpers (used by search + legacy README path)
     # -----------------
-    def ask_llm_to_fix_json(self, broken_json: str) -> Optional[str]:
+    def ask_llm_to_fix_json(self, broken_json: str) -> str | None:
         """Makes a one-shot request to the LLM to fix a broken JSON string."""
         print("--- Attempting one-shot LLM call to fix JSON ---")
         try:
@@ -324,7 +326,7 @@ class OpenRouterClientBase:
         return fenced[:closing_index].strip()
 
     @staticmethod
-    def _extract_first_json_object(content: str) -> tuple[Optional[str], bool]:
+    def _extract_first_json_object(content: str) -> tuple[str | None, bool]:
         """Return the first top-level JSON object and whether another follows it."""
         decoder = json.JSONDecoder()
         for index, char in enumerate(content):
@@ -352,7 +354,7 @@ class OpenRouterClientBase:
 
         return None, False
 
-    def parse_and_repair_json(self, content: str) -> Dict[str, Any]:
+    def parse_and_repair_json(self, content: str) -> dict[str, Any]:
         """
         A robust method to parse JSON, with multiple repair strategies.
 
@@ -397,8 +399,8 @@ class OpenRouterClientBase:
         if fixed_json_str:
             try:
                 repaired = self._strip_json_fences(fixed_json_str).strip()
-                first_document, has_multiple_documents = self._extract_first_json_object(
-                    repaired
+                first_document, has_multiple_documents = (
+                    self._extract_first_json_object(repaired)
                 )
                 if first_document is not None:
                     if has_multiple_documents:
@@ -421,7 +423,7 @@ class OpenRouterClientBase:
 
     # --- END: NEW HELPER METHODS ---
 
-    def extract_json(self, content: str) -> Dict[str, Any]:
+    def extract_json(self, content: str) -> dict[str, Any]:
         """
         Extract JSON whether or not the model wrapped it in code fences.
         (Legacy helper used by JSON-based README path.)

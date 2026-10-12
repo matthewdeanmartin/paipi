@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import random
-from typing import Any, List, Optional
+from typing import Any
 
 from openai import OpenAI
 
@@ -22,9 +22,7 @@ from .models import ReadmeRequest
 class OpenRouterClientReadMe:
     """Client for interacting with OpenRouter AI service via OpenAI interface."""
 
-    def __init__(
-        self, api_key: Optional[str] = None, base_url: Optional[str] = None
-    ) -> None:
+    def __init__(self, api_key: str | None = None, base_url: str | None = None) -> None:
         """Initialize the OpenRouter client."""
         self.api_key = api_key or config.openrouter_api_key
         self.base_url = base_url or config.openrouter_base_url
@@ -115,7 +113,7 @@ class OpenRouterClientReadMe:
 
     def generate_readme_markdown_with_model(
         self, req: ReadmeRequest
-    ) -> tuple[str, Optional[str]]:
+    ) -> tuple[str, str | None]:
         """
         NEW WAY: Ask the LLM to directly produce clean Markdown (no JSON),
         showing project metadata in a human-readable Markdown block.
@@ -153,7 +151,10 @@ class OpenRouterClientReadMe:
                     s = s.rsplit("```", 1)[0]
                 except Exception:
                     pass
-            return s.strip() + ("\n" if not s.endswith("\n") else ""), response.model_used
+            return (
+                s.strip() + ("\n" if not s.endswith("\n") else ""),
+                response.model_used,
+            )
 
         except Exception as e:
             print(f"Error generating README (markdown) via OpenRouter: {e}")
@@ -170,16 +171,16 @@ class OpenRouterClientReadMe:
         meta = req.model_dump()
 
         # Present metadata as Markdown (not JSON)
-        meta_md: List[str] = [
-            f"**Name:** {meta.get('name','')}",
-            f"**Summary:** {meta.get('summary','')}",
-            f"**Description:** {meta.get('description','')}",
-            f"**Homepage:** {meta.get('homepage','')}",
-            f"**Repository:** {meta.get('repository','')}",
-            f"**Documentation:** {meta.get('documentation','')}",
+        meta_md: list[str] = [
+            f"**Name:** {meta.get('name', '')}",
+            f"**Summary:** {meta.get('summary', '')}",
+            f"**Description:** {meta.get('description', '')}",
+            f"**Homepage:** {meta.get('homepage', '')}",
+            f"**Repository:** {meta.get('repository', '')}",
+            f"**Documentation:** {meta.get('documentation', '')}",
             f"**Keywords:** {', '.join(meta.get('keywords', []) or [])}",
-            f"**License:** {meta.get('license','')}",
-            f"**Requires Python:** {meta.get('requires_python','')}",
+            f"**License:** {meta.get('license', '')}",
+            f"**Requires Python:** {meta.get('requires_python', '')}",
         ]
         meta_block = "\n".join(["### Project Metadata", "", *meta_md])
 
@@ -233,7 +234,7 @@ class OpenRouterClientReadMe:
         def sec(title: str) -> str:
             return f"\n## {title}\n"
 
-        lines: List[str] = []
+        lines: list[str] = []
         title = data.get("title") or ""
         tagline = data.get("tagline") or ""
 

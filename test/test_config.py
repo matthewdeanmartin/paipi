@@ -102,6 +102,4 @@ def test_save_model_preferences_updates_env_file(tmp_path: Path):
     assert saved == ["google/gemma-4-31b-it:free", "openrouter/free"]
     content = env_path.read_text(encoding="utf-8")
     assert "OPENROUTER_MODEL=google/gemma-4-31b-it:free" in content
-    assert (
-        "OPENROUTER_MODELS=google/gemma-4-31b-it:free,openrouter/free" in content
-    )
+    assert "OPENROUTER_MODELS=google/gemma-4-31b-it:free,openrouter/free" in content

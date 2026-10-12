@@ -12,8 +12,6 @@ This version implements a new workflow:
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
-
 from openai import OpenAI
 
 from .cache_manager import cache_manager
@@ -40,9 +38,7 @@ class OpenRouterClientSearch:
     Implements a multi-step process to generate and validate package search results.
     """
 
-    def __init__(
-        self, api_key: Optional[str] = None, base_url: Optional[str] = None
-    ) -> None:
+    def __init__(self, api_key: str | None = None, base_url: str | None = None) -> None:
         """Initialize the OpenRouter client."""
         self.api_key = api_key or config.openrouter_api_key
         self.base_url = base_url or config.openrouter_base_url
@@ -58,7 +54,7 @@ class OpenRouterClientSearch:
 
     def _generate_package_name_candidates(
         self, query: str, limit: int, max_iterations: int = 5
-    ) -> tuple[List[str], Optional[str], list[str]]:
+    ) -> tuple[list[str], str | None, list[str]]:
         """
         Iteratively asks the LLM to generate a list of relevant package names.
 
@@ -73,7 +69,7 @@ class OpenRouterClientSearch:
         found_packages: list[str] = []
         found_package_names: set[str] = set()
         iteration = 0
-        model_used: Optional[str] = None
+        model_used: str | None = None
         attempted_models: list[str] = []
         messages = [
             {
@@ -94,7 +90,7 @@ class OpenRouterClientSearch:
             if found_packages:
                 prompt += (
                     "\n\nAvoid suggesting the following packages that have already been found: "
-                    f'{", ".join(sorted(list(found_packages)))}'
+                    f"{', '.join(sorted(list(found_packages)))}"
                 )
             prompt += "\n\nReturn only the package names, one per line."
 
@@ -165,8 +161,8 @@ class OpenRouterClientSearch:
         return found_packages[:limit], model_used, attempted_models
 
     def _generate_metadata_for_fake_packages(
-        self, package_names: List[str], query: str, batch_size: int = 3
-    ) -> tuple[Dict[str, SearchResult], list[str]]:
+        self, package_names: list[str], query: str, batch_size: int = 3
+    ) -> tuple[dict[str, SearchResult], list[str]]:
         """
         Generates full, realistic-looking metadata for a list of non-existent package names.
 
@@ -181,7 +177,7 @@ class OpenRouterClientSearch:
         if not package_names:
             return {}, []
 
-        generated_results: Dict[str, SearchResult] = {}
+        generated_results: dict[str, SearchResult] = {}
         metadata_models_used: list[str] = []
         for i in range(0, len(package_names), batch_size):
             batch = package_names[i : i + batch_size]
@@ -365,7 +361,7 @@ class OpenRouterClientSearch:
             results=final_results,
         )
 
-    def _build_metadata_prompt(self, package_names: List[str], query: str) -> str:
+    def _build_metadata_prompt(self, package_names: list[str], query: str) -> str:
         """Build the prompt for the AI to generate metadata for non-existent packages."""
         package_list_str = "\n".join(f"- {name}" for name in package_names)
         return f"""

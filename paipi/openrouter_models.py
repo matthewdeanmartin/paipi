@@ -5,11 +5,10 @@ Helpers for discovering and selecting usable OpenRouter models.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 import httpx2
-
 
 FALLBACK_ROUTER_MODEL = "openrouter/free"
 
@@ -18,7 +17,7 @@ def to_float(value: Any, default: float = 999999.0) -> float:
     """Best-effort float conversion for pricing fields."""
     try:
         return float(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return default
 
 
@@ -142,7 +141,7 @@ class ModelPoolResolution:
 
 def resolve_model_pool(
     *,
-    api_key: Optional[str],
+    api_key: str | None,
     base_url: str,
     configured_models: list[str],
 ) -> ModelPoolResolution:
@@ -175,7 +174,9 @@ def resolve_model_pool(
     }
 
     valid_configured = [
-        model for model in configured_deduped if model == FALLBACK_ROUTER_MODEL or model in available_ids
+        model
+        for model in configured_deduped
+        if model == FALLBACK_ROUTER_MODEL or model in available_ids
     ]
     unavailable_configured = [
         model
@@ -203,7 +204,7 @@ def format_shortlist(bucket_name: str, models: list[dict[str, Any]]) -> str:
         pricing = model.get("pricing", {}) or {}
         created = model.get("created")
         created_str = (
-            datetime.fromtimestamp(created, tz=timezone.utc).date().isoformat()
+            datetime.fromtimestamp(created, tz=UTC).date().isoformat()
             if created
             else "unknown"
         )

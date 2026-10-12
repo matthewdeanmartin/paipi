@@ -16,7 +16,6 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple, Union
 
 import aiohttp
 import matplotlib.pyplot as plt
@@ -64,11 +63,11 @@ class EvaluationResult:
     success_rate: float
     total_packages: int
     correct_packages: int
-    raw_responses: List[str]
-    parsed_responses: List[Dict[str, Union[str, bool]]]
-    ground_truth: List[Dict[str, Union[str, bool]]]
+    raw_responses: list[str]
+    parsed_responses: list[dict[str, str | bool]]
+    ground_truth: list[dict[str, str | bool]]
     execution_time: float
-    errors: List[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
 
 class PackageIndexManager:
@@ -79,7 +78,7 @@ class PackageIndexManager:
         self.cache_file = config.cache_dir / "pypi_index.pkl"
         self.logger = logging.getLogger(__name__)
 
-    async def get_all_packages(self) -> Set[str]:
+    async def get_all_packages(self) -> set[str]:
         """Get all package names from PyPI with caching."""
         if self._is_cache_valid():
             self.logger.info("Loading PyPI index from cache")
@@ -100,17 +99,17 @@ class PackageIndexManager:
         )
         return cache_age < self.config.pypi_cache_ttl
 
-    def _load_cache(self) -> Set[str]:
+    def _load_cache(self) -> set[str]:
         """Load cached package index."""
-        with open(self.cache_file, 'rb') as f:
+        with open(self.cache_file, "rb") as f:
             return pickle.load(f)
 
-    def _save_cache(self, packages: Set[str]) -> None:
+    def _save_cache(self, packages: set[str]) -> None:
         """Save package index to cache."""
-        with open(self.cache_file, 'wb') as f:
+        with open(self.cache_file, "wb") as f:
             pickle.dump(packages, f)
 
-    async def _download_packages(self) -> Set[str]:
+    async def _download_packages(self) -> set[str]:
         """Download all package names from PyPI."""
         url = "https://pypi.org/simple/"
         async with aiohttp.ClientSession() as session:
@@ -121,6 +120,7 @@ class PackageIndexManager:
                 html = await response.text()
                 # Extract package names from the simple API HTML
                 import re
+
                 pattern = r'<a href="[^"]*">([^<]+)</a>'
                 matches = re.findall(pattern, html)
                 return set(matches)
@@ -132,9 +132,9 @@ class ResponseCache:
     def __init__(self, config: Config) -> None:
         self.config = config
         self.cache_file = config.cache_dir / "response_cache.json"
-        self.cache: Dict[str, Dict] = self._load_cache()
+        self.cache: dict[str, dict] = self._load_cache()
 
-    def _load_cache(self) -> Dict[str, Dict]:
+    def _load_cache(self) -> dict[str, dict]:
         """Load existing cache."""
         if not self.cache_file.exists():
             return {}
@@ -142,12 +142,12 @@ class ResponseCache:
         try:
             with open(self.cache_file) as f:
                 return json.load(f)
-        except (json.JSONDecodeError, FileNotFoundError):
+        except json.JSONDecodeError, FileNotFoundError:
             return {}
 
     def _save_cache(self) -> None:
         """Save cache to disk."""
-        with open(self.cache_file, 'w') as f:
+        with open(self.cache_file, "w") as f:
             json.dump(self.cache, f, indent=2, default=str)
 
     def _make_key(self, model: str, prompt: str, temperature: float = 0.0) -> str:
@@ -155,7 +155,7 @@ class ResponseCache:
         content = f"{model}:{prompt}:{temperature}"
         return hashlib.md5(content.encode()).hexdigest()
 
-    def get(self, model: str, prompt: str, temperature: float = 0.0) -> Optional[str]:
+    def get(self, model: str, prompt: str, temperature: float = 0.0) -> str | None:
         """Get cached response if available and not expired."""
         key = self._make_key(model, prompt, temperature)
 
@@ -163,21 +163,23 @@ class ResponseCache:
             return None
 
         entry = self.cache[key]
-        cache_time = datetime.fromisoformat(entry['timestamp'])
+        cache_time = datetime.fromisoformat(entry["timestamp"])
 
         if datetime.now() - cache_time > self.config.response_cache_ttl:
             del self.cache[key]
             return None
 
-        return entry['response']
+        return entry["response"]
 
-    def set(self, model: str, prompt: str, response: str, temperature: float = 0.0) -> None:
+    def set(
+        self, model: str, prompt: str, response: str, temperature: float = 0.0
+    ) -> None:
         """Cache a response."""
         key = self._make_key(model, prompt, temperature)
         self.cache[key] = {
-            'response': response,
-            'timestamp': datetime.now().isoformat(),
-            'model': model
+            "response": response,
+            "timestamp": datetime.now().isoformat(),
+            "model": model,
         }
         self._save_cache()
 
@@ -192,10 +194,7 @@ class OpenRouterClient:
         self.semaphore = asyncio.Semaphore(config.max_concurrent_requests)
 
     async def query_model(
-        self,
-        model: str,
-        prompt: str,
-        temperature: float = 0.0
+        self, model: str, prompt: str, temperature: float = 0.0
     ) -> str:
         """Query a model with caching."""
         # Check cache first
@@ -210,21 +209,18 @@ class OpenRouterClient:
             return response
 
     async def _make_api_request(
-        self,
-        model: str,
-        prompt: str,
-        temperature: float
+        self, model: str, prompt: str, temperature: float
     ) -> str:
         """Make the actual API request."""
         headers = {
             "Authorization": f"Bearer {self.config.openrouter_api_key}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
 
         data = {
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
-            "temperature": temperature
+            "temperature": temperature,
         }
 
         async with aiohttp.ClientSession() as session:
@@ -233,7 +229,7 @@ class OpenRouterClient:
                     f"{self.config.openrouter_base_url}/chat/completions",
                     headers=headers,
                     json=data,
-                    timeout=aiohttp.ClientTimeout(total=self.config.request_timeout)
+                    timeout=aiohttp.ClientTimeout(total=self.config.request_timeout),
                 ) as response:
                     if response.status != 200:
                         error_text = await response.text()
@@ -242,18 +238,18 @@ class OpenRouterClient:
                     result = await response.json()
                     return result["choices"][0]["message"]["content"]
 
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 raise RuntimeError(f"Timeout querying {model}")
 
 
 class PackageTestGenerator:
     """Generates test cases for package evaluations."""
 
-    def __init__(self, package_index: Set[str]) -> None:
+    def __init__(self, package_index: set[str]) -> None:
         self.all_packages = package_index
         self.real_packages = list(package_index)
 
-    def generate_mixed_test(self, count: int = 25) -> List[Tuple[str, bool]]:
+    def generate_mixed_test(self, count: int = 25) -> list[tuple[str, bool]]:
         """Generate mixed real/fake packages test."""
         # 50/50 split of real and fake packages
         real_count = count // 2
@@ -273,7 +269,7 @@ class PackageTestGenerator:
         random.shuffle(test_cases)
         return test_cases
 
-    def generate_topic_packages(self, topic: str, count: int = 25) -> List[str]:
+    def generate_topic_packages(self, topic: str, count: int = 25) -> list[str]:
         """Generate real packages related to a topic."""
         topic_keywords = self._get_topic_keywords(topic)
 
@@ -286,10 +282,25 @@ class PackageTestGenerator:
         # If we don't have enough, add some popular packages
         if len(related_packages) < count:
             popular_packages = [
-                'requests', 'numpy', 'pandas', 'matplotlib', 'scipy',
-                'flask', 'django', 'fastapi', 'tensorflow', 'torch',
-                'scikit-learn', 'pillow', 'beautifulsoup4', 'selenium',
-                'click', 'pytest', 'black', 'mypy', 'poetry'
+                "requests",
+                "numpy",
+                "pandas",
+                "matplotlib",
+                "scipy",
+                "flask",
+                "django",
+                "fastapi",
+                "tensorflow",
+                "torch",
+                "scikit-learn",
+                "pillow",
+                "beautifulsoup4",
+                "selenium",
+                "click",
+                "pytest",
+                "black",
+                "mypy",
+                "poetry",
             ]
             for pkg in popular_packages:
                 if pkg in self.all_packages and pkg not in related_packages:
@@ -299,42 +310,48 @@ class PackageTestGenerator:
 
         return random.sample(related_packages, min(count, len(related_packages)))
 
-    def generate_fake_test(self, count: int = 25) -> List[str]:
+    def generate_fake_test(self, count: int = 25) -> list[str]:
         """Generate obviously fake package names."""
         return self._generate_fake_packages(count)
 
-    def _get_topic_keywords(self, topic: str) -> List[str]:
+    def _get_topic_keywords(self, topic: str) -> list[str]:
         """Get keywords related to a topic."""
         keyword_map = {
-            'web': ['web', 'http', 'api', 'flask', 'django', 'fastapi', 'requests'],
-            'data': ['data', 'pandas', 'numpy', 'csv', 'json', 'database'],
-            'ml': ['ml', 'machine', 'learning', 'ai', 'neural', 'tensorflow', 'torch'],
-            'testing': ['test', 'pytest', 'mock', 'coverage', 'unit'],
-            'gui': ['gui', 'tk', 'qt', 'kivy', 'pygame', 'graphics'],
+            "web": ["web", "http", "api", "flask", "django", "fastapi", "requests"],
+            "data": ["data", "pandas", "numpy", "csv", "json", "database"],
+            "ml": ["ml", "machine", "learning", "ai", "neural", "tensorflow", "torch"],
+            "testing": ["test", "pytest", "mock", "coverage", "unit"],
+            "gui": ["gui", "tk", "qt", "kivy", "pygame", "graphics"],
         }
 
         return keyword_map.get(topic.lower(), [topic.lower()])
 
-    def _generate_fake_packages(self, count: int) -> List[str]:
+    def _generate_fake_packages(self, count: int) -> list[str]:
         """Generate convincing fake package names."""
-        prefixes = ['py', 'lib', 'django', 'flask', 'data', 'ml', 'ai', 'web']
-        suffixes = ['utils', 'tools', 'lib', 'kit', 'py', 'core', 'api', 'client']
-        words = ['parser', 'handler', 'manager', 'helper', 'wrapper', 'builder']
+        prefixes = ["py", "lib", "django", "flask", "data", "ml", "ai", "web"]
+        suffixes = ["utils", "tools", "lib", "kit", "py", "core", "api", "client"]
+        words = ["parser", "handler", "manager", "helper", "wrapper", "builder"]
 
         fake_packages = []
         while len(fake_packages) < count:
             # Generate different types of fake names
             if random.random() < 0.3:
                 # Prefix + word + suffix
-                name = random.choice(prefixes) + random.choice(words) + random.choice(suffixes)
+                name = (
+                    random.choice(prefixes)
+                    + random.choice(words)
+                    + random.choice(suffixes)
+                )
             elif random.random() < 0.5:
                 # Just word + suffix
                 name = random.choice(words) + random.choice(suffixes)
             else:
                 # Completely made up
-                consonants = 'bcdfghjklmnpqrstvwxyz'
-                vowels = 'aeiou'
-                name = ''.join(random.choices(consonants + vowels, k=random.randint(6, 12)))
+                consonants = "bcdfghjklmnpqrstvwxyz"
+                vowels = "aeiou"
+                name = "".join(
+                    random.choices(consonants + vowels, k=random.randint(6, 12))
+                )
 
             # Make sure it's not a real package and not already in our fake list
             if name not in self.all_packages and name not in fake_packages:
@@ -352,10 +369,8 @@ class EvaluationEngine:
         self.logger = logging.getLogger(__name__)
 
     async def run_mixed_package_evaluation(
-        self,
-        models: List[str],
-        test_cases: List[Tuple[str, bool]]
-    ) -> List[EvaluationResult]:
+        self, models: list[str], test_cases: list[tuple[str, bool]]
+    ) -> list[EvaluationResult]:
         """Run the mixed package evaluation."""
         prompt_template = """
 I will give you a list of Python package names. For each package, tell me if it's a real Python package available on PyPI or not.
@@ -370,7 +385,7 @@ CSV Response:
         """
 
         package_names = [pkg for pkg, _ in test_cases]
-        prompt = prompt_template.format(packages='\n'.join(package_names))
+        prompt = prompt_template.format(packages="\n".join(package_names))
 
         results = []
         for model in models:
@@ -383,10 +398,12 @@ CSV Response:
 
                 # Calculate accuracy
                 correct = 0
-                ground_truth = [{'package': pkg, 'is_real': is_real} for pkg, is_real in test_cases]
+                ground_truth = [
+                    {"package": pkg, "is_real": is_real} for pkg, is_real in test_cases
+                ]
 
                 for i, (pkg, expected) in enumerate(test_cases):
-                    if i < len(parsed) and parsed[i].get('is_real') == expected:
+                    if i < len(parsed) and parsed[i].get("is_real") == expected:
                         correct += 1
 
                 success_rate = correct / len(test_cases)
@@ -402,7 +419,7 @@ CSV Response:
                     raw_responses=[response],
                     parsed_responses=parsed,
                     ground_truth=ground_truth,
-                    execution_time=execution_time
+                    execution_time=execution_time,
                 )
 
                 results.append(result)
@@ -421,18 +438,15 @@ CSV Response:
                     parsed_responses=[],
                     ground_truth=[],
                     execution_time=time.time() - start_time,
-                    errors=[str(e)]
+                    errors=[str(e)],
                 )
                 results.append(result)
 
         return results
 
     async def run_topic_generation_evaluation(
-        self,
-        models: List[str],
-        topic: str,
-        ground_truth_packages: Set[str]
-    ) -> List[EvaluationResult]:
+        self, models: list[str], topic: str, ground_truth_packages: set[str]
+    ) -> list[EvaluationResult]:
         """Run the topic-based package generation evaluation."""
         prompt = f"""
 Please list 25 real Python packages that are related to {topic}. 
@@ -457,13 +471,19 @@ Package names:
                 package_names = self._parse_list_response(response)
 
                 # Check how many are real packages
-                correct = sum(1 for pkg in package_names if pkg in ground_truth_packages)
+                correct = sum(
+                    1 for pkg in package_names if pkg in ground_truth_packages
+                )
                 success_rate = correct / len(package_names) if package_names else 0
                 execution_time = time.time() - start_time
 
-                parsed_responses = [{'package': pkg, 'is_real': pkg in ground_truth_packages}
-                                  for pkg in package_names]
-                ground_truth = [{'package': pkg, 'is_real': True} for pkg in package_names]
+                parsed_responses = [
+                    {"package": pkg, "is_real": pkg in ground_truth_packages}
+                    for pkg in package_names
+                ]
+                ground_truth = [
+                    {"package": pkg, "is_real": True} for pkg in package_names
+                ]
 
                 result = EvaluationResult(
                     model_name=model,
@@ -475,11 +495,13 @@ Package names:
                     raw_responses=[response],
                     parsed_responses=parsed_responses,
                     ground_truth=ground_truth,
-                    execution_time=execution_time
+                    execution_time=execution_time,
                 )
 
                 results.append(result)
-                self.logger.info(f"{model}: {success_rate:.2%} real packages for {topic}")
+                self.logger.info(
+                    f"{model}: {success_rate:.2%} real packages for {topic}"
+                )
 
             except Exception as e:
                 self.logger.error(f"Error evaluating {model}: {e}")
@@ -494,17 +516,15 @@ Package names:
                     parsed_responses=[],
                     ground_truth=[],
                     execution_time=time.time() - start_time,
-                    errors=[str(e)]
+                    errors=[str(e)],
                 )
                 results.append(result)
 
         return results
 
     async def run_fake_detection_evaluation(
-        self,
-        models: List[str],
-        fake_packages: List[str]
-    ) -> List[EvaluationResult]:
+        self, models: list[str], fake_packages: list[str]
+    ) -> list[EvaluationResult]:
         """Run the fake package detection evaluation."""
         prompt_template = """
 I will give you a list of Python package names. All of these packages are FAKE and do NOT exist on PyPI.
@@ -519,7 +539,7 @@ Package names:
 CSV Response:
         """
 
-        prompt = prompt_template.format(packages='\n'.join(fake_packages))
+        prompt = prompt_template.format(packages="\n".join(fake_packages))
 
         results = []
         for model in models:
@@ -531,11 +551,13 @@ CSV Response:
                 parsed = self._parse_csv_response(response, fake_packages)
 
                 # Count how many were correctly identified as fake (is_real=False)
-                correct = sum(1 for item in parsed if not item.get('is_real', True))
+                correct = sum(1 for item in parsed if not item.get("is_real", True))
                 success_rate = correct / len(fake_packages)
                 execution_time = time.time() - start_time
 
-                ground_truth = [{'package': pkg, 'is_real': False} for pkg in fake_packages]
+                ground_truth = [
+                    {"package": pkg, "is_real": False} for pkg in fake_packages
+                ]
 
                 result = EvaluationResult(
                     model_name=model,
@@ -547,11 +569,13 @@ CSV Response:
                     raw_responses=[response],
                     parsed_responses=parsed,
                     ground_truth=ground_truth,
-                    execution_time=execution_time
+                    execution_time=execution_time,
                 )
 
                 results.append(result)
-                self.logger.info(f"{model}: {success_rate:.2%} fake packages correctly identified")
+                self.logger.info(
+                    f"{model}: {success_rate:.2%} fake packages correctly identified"
+                )
 
             except Exception as e:
                 self.logger.error(f"Error evaluating {model}: {e}")
@@ -566,48 +590,47 @@ CSV Response:
                     parsed_responses=[],
                     ground_truth=[],
                     execution_time=time.time() - start_time,
-                    errors=[str(e)]
+                    errors=[str(e)],
                 )
                 results.append(result)
 
         return results
 
-    def _parse_csv_response(self, response: str, expected_packages: List[str]) -> List[Dict[str, Union[str, bool]]]:
+    def _parse_csv_response(
+        self, response: str, expected_packages: list[str]
+    ) -> list[dict[str, str | bool]]:
         """Parse CSV response from model."""
-        lines = response.strip().split('\n')
+        lines = response.strip().split("\n")
         results = []
 
         for line in lines:
             line = line.strip()
-            if not line or line.startswith('package_name') or ',' not in line:
+            if not line or line.startswith("package_name") or "," not in line:
                 continue
 
-            parts = line.split(',', 1)
+            parts = line.split(",", 1)
             if len(parts) == 2:
-                package_name = parts[0].strip().strip('"\'')
-                is_real_str = parts[1].strip().lower().strip('"\'')
-                is_real = is_real_str in ['true', 'yes', '1', 'real']
+                package_name = parts[0].strip().strip("\"'")
+                is_real_str = parts[1].strip().lower().strip("\"'")
+                is_real = is_real_str in ["true", "yes", "1", "real"]
 
-                results.append({
-                    'package': package_name,
-                    'is_real': is_real
-                })
+                results.append({"package": package_name, "is_real": is_real})
 
         return results
 
-    def _parse_list_response(self, response: str) -> List[str]:
+    def _parse_list_response(self, response: str) -> list[str]:
         """Parse list response from model."""
-        lines = response.strip().split('\n')
+        lines = response.strip().split("\n")
         packages = []
 
         for line in lines:
             line = line.strip()
             # Remove numbering, bullets, etc.
-            line = re.sub(r'^\d+\.?\s*', '', line)
-            line = re.sub(r'^[-*]\s*', '', line)
-            line = line.strip().strip('"\'')
+            line = re.sub(r"^\d+\.?\s*", "", line)
+            line = re.sub(r"^[-*]\s*", "", line)
+            line = line.strip().strip("\"'")
 
-            if line and not line.startswith('Package') and len(line) > 1:
+            if line and not line.startswith("Package") and len(line) > 1:
                 packages.append(line)
 
         return packages
@@ -619,24 +642,26 @@ class ResultsAnalyzer:
     def __init__(self, config: Config) -> None:
         self.config = config
 
-    def create_summary_report(self, results: List[EvaluationResult]) -> pd.DataFrame:
+    def create_summary_report(self, results: list[EvaluationResult]) -> pd.DataFrame:
         """Create a summary DataFrame of all results."""
         data = []
         for result in results:
-            data.append({
-                'model': result.model_name,
-                'evaluation': result.evaluation_type,
-                'success_rate': result.success_rate,
-                'total_packages': result.total_packages,
-                'correct_packages': result.correct_packages,
-                'execution_time': result.execution_time,
-                'timestamp': result.timestamp,
-                'has_errors': len(result.errors) > 0
-            })
+            data.append(
+                {
+                    "model": result.model_name,
+                    "evaluation": result.evaluation_type,
+                    "success_rate": result.success_rate,
+                    "total_packages": result.total_packages,
+                    "correct_packages": result.correct_packages,
+                    "execution_time": result.execution_time,
+                    "timestamp": result.timestamp,
+                    "has_errors": len(result.errors) > 0,
+                }
+            )
 
         return pd.DataFrame(data)
 
-    def plot_success_rates(self, results: List[EvaluationResult]) -> None:
+    def plot_success_rates(self, results: list[EvaluationResult]) -> None:
         """Create success rate comparison plots."""
         df = self.create_summary_report(results)
 
@@ -644,79 +669,104 @@ class ResultsAnalyzer:
         plt.figure(figsize=(12, 8))
 
         # Group by model and evaluation type
-        pivot_df = df.pivot(index='model', columns='evaluation', values='success_rate')
-        pivot_df.plot(kind='bar', ax=plt.gca())
+        pivot_df = df.pivot(index="model", columns="evaluation", values="success_rate")
+        pivot_df.plot(kind="bar", ax=plt.gca())
 
-        plt.title('LLM Package Knowledge Evaluation Results')
-        plt.xlabel('Model')
-        plt.ylabel('Success Rate')
-        plt.legend(title='Evaluation Type')
-        plt.xticks(rotation=45, ha='right')
+        plt.title("LLM Package Knowledge Evaluation Results")
+        plt.xlabel("Model")
+        plt.ylabel("Success Rate")
+        plt.legend(title="Evaluation Type")
+        plt.xticks(rotation=45, ha="right")
         plt.tight_layout()
 
-        plt.savefig(self.config.plots_dir / 'success_rates_comparison.png', dpi=300, bbox_inches='tight')
+        plt.savefig(
+            self.config.plots_dir / "success_rates_comparison.png",
+            dpi=300,
+            bbox_inches="tight",
+        )
         plt.close()
 
         # Heatmap
         plt.figure(figsize=(10, 6))
-        sns.heatmap(pivot_df, annot=True, cmap='RdYlGn', fmt='.2%', cbar_kws={'label': 'Success Rate'})
-        plt.title('Model Performance Heatmap')
+        sns.heatmap(
+            pivot_df,
+            annot=True,
+            cmap="RdYlGn",
+            fmt=".2%",
+            cbar_kws={"label": "Success Rate"},
+        )
+        plt.title("Model Performance Heatmap")
         plt.tight_layout()
 
-        plt.savefig(self.config.plots_dir / 'performance_heatmap.png', dpi=300, bbox_inches='tight')
+        plt.savefig(
+            self.config.plots_dir / "performance_heatmap.png",
+            dpi=300,
+            bbox_inches="tight",
+        )
         plt.close()
 
-    def plot_execution_times(self, results: List[EvaluationResult]) -> None:
+    def plot_execution_times(self, results: list[EvaluationResult]) -> None:
         """Plot execution time analysis."""
         df = self.create_summary_report(results)
 
         plt.figure(figsize=(10, 6))
-        for eval_type in df['evaluation'].unique():
-            subset = df[df['evaluation'] == eval_type]
-            plt.scatter(subset['model'], subset['execution_time'],
-                       label=eval_type, alpha=0.7, s=100)
+        for eval_type in df["evaluation"].unique():
+            subset = df[df["evaluation"] == eval_type]
+            plt.scatter(
+                subset["model"],
+                subset["execution_time"],
+                label=eval_type,
+                alpha=0.7,
+                s=100,
+            )
 
-        plt.title('Execution Time by Model and Evaluation Type')
-        plt.xlabel('Model')
-        plt.ylabel('Execution Time (seconds)')
+        plt.title("Execution Time by Model and Evaluation Type")
+        plt.xlabel("Model")
+        plt.ylabel("Execution Time (seconds)")
         plt.legend()
-        plt.xticks(rotation=45, ha='right')
+        plt.xticks(rotation=45, ha="right")
         plt.tight_layout()
 
-        plt.savefig(self.config.plots_dir / 'execution_times.png', dpi=300, bbox_inches='tight')
+        plt.savefig(
+            self.config.plots_dir / "execution_times.png", dpi=300, bbox_inches="tight"
+        )
         plt.close()
 
-    def save_detailed_results(self, results: List[EvaluationResult]) -> None:
+    def save_detailed_results(self, results: list[EvaluationResult]) -> None:
         """Save detailed results to files."""
         # Summary CSV
         summary_df = self.create_summary_report(results)
-        summary_df.to_csv(self.config.results_dir / 'summary_results.csv', index=False)
+        summary_df.to_csv(self.config.results_dir / "summary_results.csv", index=False)
 
         # Detailed JSON
         detailed_results = []
         for result in results:
-            detailed_results.append({
-                'model_name': result.model_name,
-                'evaluation_type': result.evaluation_type,
-                'timestamp': result.timestamp.isoformat(),
-                'success_rate': result.success_rate,
-                'total_packages': result.total_packages,
-                'correct_packages': result.correct_packages,
-                'execution_time': result.execution_time,
-                'raw_responses': result.raw_responses,
-                'parsed_responses': result.parsed_responses,
-                'ground_truth': result.ground_truth,
-                'errors': result.errors
-            })
+            detailed_results.append(
+                {
+                    "model_name": result.model_name,
+                    "evaluation_type": result.evaluation_type,
+                    "timestamp": result.timestamp.isoformat(),
+                    "success_rate": result.success_rate,
+                    "total_packages": result.total_packages,
+                    "correct_packages": result.correct_packages,
+                    "execution_time": result.execution_time,
+                    "raw_responses": result.raw_responses,
+                    "parsed_responses": result.parsed_responses,
+                    "ground_truth": result.ground_truth,
+                    "errors": result.errors,
+                }
+            )
 
-        with open(self.config.results_dir / 'detailed_results.json', 'w') as f:
+        with open(self.config.results_dir / "detailed_results.json", "w") as f:
             json.dump(detailed_results, f, indent=2, default=str)
 
 
 async def main() -> None:
     """Main evaluation pipeline."""
     # Setup logging
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+    )
     logger = logging.getLogger(__name__)
 
     # Configuration
@@ -753,15 +803,21 @@ async def main() -> None:
     all_results = []
 
     logger.info("Running mixed package evaluation...")
-    mixed_results = await evaluation_engine.run_mixed_package_evaluation(models, mixed_test_cases)
+    mixed_results = await evaluation_engine.run_mixed_package_evaluation(
+        models, mixed_test_cases
+    )
     all_results.extend(mixed_results)
 
     logger.info("Running topic generation evaluation...")
-    topic_results = await evaluation_engine.run_topic_generation_evaluation(models, "web", all_packages)
+    topic_results = await evaluation_engine.run_topic_generation_evaluation(
+        models, "web", all_packages
+    )
     all_results.extend(topic_results)
 
     logger.info("Running fake detection evaluation...")
-    fake_results = await evaluation_engine.run_fake_detection_evaluation(models, fake_packages)
+    fake_results = await evaluation_engine.run_fake_detection_evaluation(
+        models, fake_packages
+    )
     all_results.extend(fake_results)
 
     # Analyze and save results
@@ -771,21 +827,23 @@ async def main() -> None:
     analyzer.save_detailed_results(all_results)
 
     # Print summary
-    logger.info("\n" + "="*50)
+    logger.info("\n" + "=" * 50)
     logger.info("EVALUATION SUMMARY")
-    logger.info("="*50)
+    logger.info("=" * 50)
 
     summary_df = analyzer.create_summary_report(all_results)
     for model in models:
-        model_results = summary_df[summary_df['model'] == model]
+        model_results = summary_df[summary_df["model"] == model]
         logger.info(f"\n{model}:")
         for _, row in model_results.iterrows():
-            logger.info(f"  {row['evaluation']}: {row['success_rate']:.2%} ({row['correct_packages']}/{row['total_packages']})")
+            logger.info(
+                f"  {row['evaluation']}: {row['success_rate']:.2%} ({row['correct_packages']}/{row['total_packages']})"
+            )
 
     logger.info(f"\nDetailed results saved to: {config.results_dir}")
     logger.info(f"Visualizations saved to: {config.plots_dir}")
     logger.info("Evaluation complete")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
